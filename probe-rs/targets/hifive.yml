@@ -1,6 +1,6 @@
-name: <family name>
+name: mindgove-chip
 variants:
-- name: <chip name>
+- name: min12345
   cores:
   - name: main
     type: armv6m

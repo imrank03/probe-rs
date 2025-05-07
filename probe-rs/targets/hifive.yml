@@ -1,0 +1,48 @@
+name: <family name>
+variants:
+- name: <chip name>
+  cores:
+  - name: main
+    type: armv6m
+    core_access_options: !Arm
+      ap: !v1 0
+  memory_map:
+  - !Nvm
+    range:
+      start: 0x0
+      end: 0x2000
+    cores:
+    - main
+  - !Ram
+    range:
+      start: 0x10000
+      end: 0x20000
+    cores:
+    - main
+    access:
+      boot: true
+  flash_algorithms:
+  - hifive-flashloader
+flash_algorithms:
+- name: hifive-flashloader
+  description: ''
+  default: true
+  instructions: t0UBELBF408G/hlGsMXwReNPBv4JRpDNsEXjTwb+EwZwDbDF8EXjTwb+E1aFAMFmE1eFAZOGBvB1jumOWY6iBmIFVY1RjbBF408G/hMWBQFhgrDF8EXjTwb+sEXjTwb+ExaFAGGCsMXwReNPBv6wReNPBv5hgajF6EXjTwX+I6wFAAlFFUaIzbRF488G/rDF9EXjzwb+tEXjzwb+I6QFBPRF488G/oWKI6wFAOn+AUWCgDdFARAjIAUGAUWCgLdGARC4RuNPB/4ZR7jG+EbjTwf+CUeYzrhG408H/glHuMb4RuNPB/6TWIUAQWiTUoUBEwcI8LP36ABpj7PnVwAiB2IFWY1djbhG408H/hMXBQFhg7jG+EbjTwf+uEbjTwf+ExeFAGGDuMb4RuNPB/64RuNPB/5hgajG6EbjTwX+kc2ylQNFBgC4RuNPB/6oxuhG408F/gUG4xa2/iOsBgAJRZVFiM6wRuNPBv6sxvBG408G/rBG408G/iOkBgTwRuNPBv4FiiOsBgBp/gFFgoABRYKAAAA=
+  pc_init: 0xb2
+  pc_uninit: 0x18e
+  pc_program_page: 0xbe
+  pc_erase_sector: 0x0
+  data_section_offset: 0x194
+  flash_properties:
+    address_range:
+      start: 0x20000000
+      end: 0x22000000
+    page_size: 0x100
+    erased_byte_value: 0xff
+    program_page_timeout: 1000
+    erase_sector_timeout: 2000
+    sectors:
+    - size: 0x1000
+      address: 0x0
+  cores:
+  - main

@@ -1,7 +1,7 @@
 name: mindgrow
 manufacturer:
-  id: 0x9
-  cc: 0x9
+  id: 0x3
+  cc: 0x0
 variants:
 - name: mindgrow-v
   cores:

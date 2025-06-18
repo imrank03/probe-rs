@@ -15,7 +15,7 @@ use crate::{
 };
 use anyhow::{Result, anyhow};
 use probe_rs::{
-    CoreStatus, Session, VectorCatchCondition,
+    BreakpointCause, CoreStatus, HaltReason, Session, VectorCatchCondition,
     config::{Registry, TargetSelector},
     probe::list::Lister,
     rtt::ScanRegion,
@@ -23,7 +23,7 @@ use probe_rs::{
 use probe_rs_debug::{
     DebugRegisters, SourceLocation, debug_info::DebugInfo, exception_handler_for_core,
 };
-use std::{env::set_current_dir, time::Duration};
+use std::{collections::HashMap, env::set_current_dir, time::Duration};
 use time::UtcOffset;
 
 /// The supported breakpoint types
@@ -69,7 +69,7 @@ pub(crate) struct SessionData {
 }
 
 impl SessionData {
-    pub(crate) fn new(
+    pub(crate) async fn new(
         registry: &mut Registry,
         lister: &Lister,
         config: &mut configuration::SessionConfig,
@@ -78,7 +78,7 @@ impl SessionData {
         let target_selector = TargetSelector::from(config.chip.as_deref());
 
         let options = config.probe_options().load(registry)?;
-        let target_probe = options.attach_probe(lister)?;
+        let target_probe = options.attach_probe(lister).await?;
         let mut target_session = options
             .attach_session(target_probe, target_selector)
             .map_err(|operation_error| {
@@ -182,6 +182,11 @@ impl SessionData {
                 rtt_client: None,
                 clear_rtt_header: false,
                 rtt_header_cleared: false,
+
+                // We're abusing the RTT window machinery here for simplicity.
+                // Let's assume there are less than 1024 RTT channels.
+                next_semihosting_handle: 1024,
+                semihosting_handles: HashMap::new(),
             })
         }
 
@@ -321,8 +326,12 @@ impl SessionData {
                 continue;
             };
 
+            // poll_core will not tell us if the core's status has changed,
+            // so we need to keep track of the previous status.
+            let previous_core_status = target_core.core_data.last_known_status;
+
             // We need to poll the core to determine its status.
-            let current_core_status =
+            let mut current_core_status =
                 target_core.poll_core(debug_adapter).inspect_err(|error| {
                     let _ = debug_adapter.show_error_message(error);
                 })?;
@@ -337,24 +346,40 @@ impl SessionData {
                     {
                         suggest_delay_required = false;
                     }
-                } else if debug_adapter.configuration_is_done() {
-                    // We have not yet reached the point in the target application where the RTT buffers are initialized,
-                    // so, provided we have processed the MSDAP request for "configurationDone", we should check again.
-
+                } else {
                     #[allow(clippy::unwrap_used)]
-                    match target_core.attach_to_rtt(
+                    if let Err(error) = target_core.attach_to_rtt(
                         debug_adapter,
                         core_config.program_binary.as_ref().unwrap(),
                         &core_config.rtt_config,
                         timestamp_offset,
                     ) {
-                        Ok(_) => {} // Nothing else to do.
-                        Err(error) => {
-                            debug_adapter
-                                .show_error_message(&DebuggerError::Other(error))
-                                .ok();
-                        }
+                        debug_adapter
+                            .show_error_message(&DebuggerError::Other(error))
+                            .ok();
                     }
+                }
+            }
+
+            // Handle potential semihosting commands. If the command is handled,
+            // the core will be resumed, so we need to update the status.
+            // If the command is not handled, the core will remain halted and we
+            // need to notify the UI.
+            if current_core_status != previous_core_status {
+                if let CoreStatus::Halted(HaltReason::Breakpoint(BreakpointCause::Semihosting(
+                    command,
+                ))) = current_core_status
+                {
+                    current_core_status = target_core.handle_semihosting(debug_adapter, command)?;
+
+                    if current_core_status.is_halted() {
+                        // poll_core did not notify about the halt, so we need to do it manually.
+                        target_core.notify_halted(debug_adapter, current_core_status)?;
+                    } else {
+                        // If the semihosting command was handled, we do not need to suggest a delay.
+                        suggest_delay_required = false;
+                    }
+                    target_core.core_data.last_known_status = current_core_status;
                 }
             }
 
@@ -362,9 +387,9 @@ impl SessionData {
             // By setting it here, we ensure that RTT will be checked at least once after the core has halted.
             if !current_core_status.is_halted() {
                 debug_adapter.all_cores_halted = false;
-            // If currently halted, and was previously running
-            // update the stack frames
             } else if !cores_halted_previously {
+                // If currently halted, and was previously running
+                // update the stack frames
                 let _stackframe_span = tracing::debug_span!("Update Stack Frames").entered();
                 tracing::debug!(
                     "Updating the stack frame data for core #{}",

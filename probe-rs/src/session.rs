@@ -124,7 +124,7 @@ impl ArchitectureInterface {
         match self {
             ArchitectureInterface::Arm(interface) => combined_state.attach_arm(target, interface),
             ArchitectureInterface::Jtag(probe, ifaces) => {
-                let idx = combined_state.interface_idx();
+                let idx = combined_state.jtag_tap_index();
                 if let Some(probe) = probe.try_as_jtag_probe() {
                     probe.select_target(idx)?;
                 }
@@ -229,22 +229,26 @@ impl Session {
                 }
             }
         }
+
         probe.attach_to_unspecified()?;
-        if let Some(probe) = probe.try_as_jtag_probe() {
-            if let Ok(chain) = probe.scan_chain() {
-                if !chain.is_empty() {
-                    for core in &cores {
-                        probe.select_target(core.interface_idx())?;
+        if probe.protocol() == Some(WireProtocol::Jtag) {
+            if let Some(probe) = probe.try_as_jtag_probe() {
+                if let Ok(chain) = probe.scan_chain() {
+                    if !chain.is_empty() {
+                        for core in &cores {
+                            probe.select_target(core.jtag_tap_index())?;
+                        }
                     }
                 }
             }
         }
 
-        let interface = probe.try_into_arm_interface().map_err(|(_, err)| err)?;
+        let mut interface = probe
+            .try_into_arm_interface(sequence_handle.clone())
+            .map_err(|(_, err)| err)?;
 
-        let mut interface = interface
-            .initialize(sequence_handle.clone(), default_dp)
-            .map_err(|(_interface, e)| e)?;
+        interface.select_debug_port(default_dp)?;
+
         let unlock_span = tracing::debug_span!("debug_device_unlock").entered();
 
         // Enable debug mode
@@ -348,7 +352,7 @@ impl Session {
 
         // FIXME: This is terribly JTAG-specific. Since we don't really support anything else yet,
         // it should be fine for now.
-        let highest_idx = cores.iter().map(|c| c.interface_idx()).max().unwrap_or(0);
+        let highest_idx = cores.iter().map(|c| c.jtag_tap_index()).max().unwrap_or(0);
         let tap_count = if let Some(probe) = probe.try_as_jtag_probe() {
             match probe.scan_chain() {
                 Ok(scan_chain) => scan_chain.len().max(highest_idx + 1),
@@ -364,7 +368,7 @@ impl Session {
         // Create a new interface by walking through the cores and initialising the TAPs that
         // we find mentioned.
         for core in cores.iter() {
-            let iface_idx = core.interface_idx();
+            let iface_idx = core.jtag_tap_index();
 
             let core_arch = core.core_type().architecture();
 
@@ -435,16 +439,12 @@ impl Session {
         Ok(session)
     }
 
-    /// Automatically creates a session with the first connected probe found.
-    #[tracing::instrument(skip(target))]
-    pub fn auto_attach(
-        target: impl Into<TargetSelector>,
-        session_config: SessionConfig,
-    ) -> Result<Session, Error> {
+    /// Automatically open a probe with the given session config.
+    async fn auto_probe(session_config: &SessionConfig) -> Result<Probe, Error> {
         // Get a list of all available debug probes.
         let lister = Lister::new();
 
-        let probes = lister.list_all();
+        let probes = lister.list_all().await;
 
         // Use the first probe found.
         let mut probe = probes
@@ -462,9 +462,33 @@ impl Session {
         if let Some(protocol) = session_config.protocol {
             probe.select_protocol(protocol)?;
         }
+        Ok(probe)
+    }
 
+    /// Automatically creates a session with the first connected probe found.
+    #[tracing::instrument(skip(target))]
+    pub async fn auto_attach(
+        target: impl Into<TargetSelector>,
+        session_config: SessionConfig,
+    ) -> Result<Session, Error> {
         // Attach to a chip.
-        probe.attach(target, session_config.permissions)
+        Self::auto_probe(&session_config)
+            .await?
+            .attach(target, session_config.permissions)
+    }
+
+    /// Automatically creates a session with the first connected probe found
+    /// using the registry that was provided.
+    #[tracing::instrument(skip(target, registry))]
+    pub async fn auto_attach_with_registry(
+        target: impl Into<TargetSelector>,
+        session_config: SessionConfig,
+        registry: &Registry,
+    ) -> Result<Session, Error> {
+        // Attach to a chip.
+        Self::auto_probe(&session_config)
+            .await?
+            .attach_with_registry(target, session_config.permissions, registry)
     }
 
     /// Lists the available cores with their number and their type.
@@ -507,7 +531,7 @@ impl Session {
     fn interface_idx(&self, core: usize) -> Result<usize, Error> {
         self.cores
             .get(core)
-            .map(|c| c.interface_idx())
+            .map(|c| c.jtag_tap_index())
             .ok_or(Error::CoreNotFound(core))
     }
 
@@ -534,16 +558,19 @@ impl Session {
             .get_mut(core_index)
             .ok_or(Error::CoreNotFound(core_index))?;
 
-        match self.interfaces.attach(&self.target, combined_state) {
-            Err(Error::Xtensa(XtensaError::CoreDisabled)) => {
-                // If the core is disabled, we can't attach to it.
-                // We can't do anything about it, so we just translate
-                // and return the error.
-                // We'll retry at the next call.
-                Err(Error::CoreDisabled(core_index))
-            }
-            other => other,
-        }
+        self.interfaces
+            .attach(&self.target, combined_state)
+            .map_err(|e| {
+                if matches!(e, Error::Xtensa(XtensaError::CoreDisabled)) {
+                    // If the core is disabled, we can't attach to it.
+                    // We can't do anything about it, so we just translate
+                    // and return the error.
+                    // We'll retry at the next call.
+                    Error::CoreDisabled(core_index)
+                } else {
+                    e
+                }
+            })
     }
 
     /// Read available trace data from the specified data sink.
@@ -646,9 +673,8 @@ impl Session {
         // but we only have &mut. We can work around that by first creating
         // an instance of a Dummy and then swapping it out for the real one.
         // perform the re-attach and then swap it back.
-        let tmp_interface = Box::<FakeProbe>::default().try_get_arm_interface().unwrap();
-        let mut tmp_interface = tmp_interface
-            .initialize(DefaultArmSequence::create(), DpAddress::Default)
+        let mut tmp_interface = Box::<FakeProbe>::default()
+            .try_get_arm_interface(DefaultArmSequence::create())
             .unwrap();
 
         std::mem::swap(interface, &mut tmp_interface);
@@ -658,13 +684,15 @@ impl Session {
         probe.detach()?;
         probe.attach_to_unspecified()?;
 
-        let new_interface = probe.try_into_arm_interface().map_err(|(_, err)| err)?;
+        let mut new_interface = probe
+            .try_into_arm_interface(debug_sequence.clone())
+            .map_err(|(_, err)| err)?;
 
-        tmp_interface = new_interface
-            .initialize(debug_sequence.clone(), current_dp)
-            .map_err(|(_interface, e)| e)?;
+        if let Some(current_dp) = current_dp {
+            new_interface.select_debug_port(current_dp)?;
+        }
         // swap it back
-        std::mem::swap(interface, &mut tmp_interface);
+        std::mem::swap(interface, &mut new_interface);
 
         tracing::debug!("Probe re-attached");
         Ok(())

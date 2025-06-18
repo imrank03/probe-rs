@@ -3,30 +3,33 @@ use std::{
     char,
     io::{BufReader, BufWriter, Read, Write},
     net::SocketAddr,
+    sync::Arc,
     time::Duration,
 };
 
 use crate::{
     architecture::{
         arm::{
-            ArmCommunicationInterface,
-            communication_interface::{DapProbe, UninitializedArmProbe},
+            ArmCommunicationInterface, ArmError, ArmProbeInterface,
+            communication_interface::DapProbe, sequences::ArmDebugSequence,
         },
-        riscv::{communication_interface::RiscvInterfaceBuilder, dtm::jtag_dtm::JtagDtmBuilder},
+        riscv::{
+            communication_interface::{RiscvError, RiscvInterfaceBuilder},
+            dtm::jtag_dtm::JtagDtmBuilder,
+        },
         xtensa::communication_interface::{
-            XtensaCommunicationInterface, XtensaDebugInterfaceState,
+            XtensaCommunicationInterface, XtensaDebugInterfaceState, XtensaError,
         },
     },
-    probe::{DebugProbe, DebugProbeInfo, DebugProbeSelector, JTAGAccess, ProbeFactory},
+    probe::{
+        AutoImplementJtagAccess, DebugProbe, DebugProbeError, DebugProbeInfo, DebugProbeSelector,
+        IoSequenceItem, JtagAccess, JtagDriverState, ProbeCreationError, ProbeError, ProbeFactory,
+        ProbeStatistics, RawJtagIo, RawSwdIo, SwdSettings, WireProtocol,
+        blackmagic::arm::BlackMagicProbeArmDebug,
+    },
 };
 use bitvec::vec::BitVec;
 use serialport::{SerialPortType, available_ports};
-
-use super::{
-    DebugProbeError, ProbeCreationError, ProbeError, WireProtocol,
-    arm_debug_interface::{IoSequenceItem, ProbeStatistics, RawProtocolIo, SwdSettings},
-    common::{JtagDriverState, RawJtagIo},
-};
 
 const BLACK_MAGIC_PROBE_VID: u16 = 0x1d50;
 const BLACK_MAGIC_PROBE_PID: u16 = 0x6018;
@@ -36,7 +39,6 @@ const BLACK_MAGIC_PROTOCOL_RESPONSE_END: u8 = b'#';
 pub(crate) const BLACK_MAGIC_REMOTE_SIZE_MAX: usize = 1024;
 
 mod arm;
-use arm::UninitializedBlackMagicArmProbe;
 
 /// A factory for creating [`BlackMagicProbe`] instances.
 #[derive(Debug)]
@@ -932,7 +934,7 @@ impl BlackMagicProbe {
             if dir != self.swd_direction
                 || accumulator_length >= core::mem::size_of_val(&accumulator) * 8
             {
-                // Inputs are off-by-one due to how J-Link is built. Remove one bit
+                // Inputs are off-by-one due to input latency. Remove one bit
                 // from the accumulator and store the turnaround bit at the end of
                 // the transaction.
                 if self.swd_direction == SwdDirection::Input && dir == SwdDirection::Output {
@@ -953,7 +955,7 @@ impl BlackMagicProbe {
                 accumulator_length = 0;
             }
             self.swd_direction = dir;
-            accumulator |= if swdio.try_into().unwrap_or(false) {
+            accumulator |= if let IoSequenceItem::Output(true) = swdio {
                 1 << accumulator_length
             } else {
                 0
@@ -1126,13 +1128,13 @@ impl DebugProbe for BlackMagicProbe {
         self.protocol
     }
 
-    fn try_as_jtag_probe(&mut self) -> Option<&mut dyn JTAGAccess> {
+    fn try_as_jtag_probe(&mut self) -> Option<&mut dyn JtagAccess> {
         Some(self)
     }
 
     fn try_get_riscv_interface_builder<'probe>(
         &'probe mut self,
-    ) -> Result<Box<dyn RiscvInterfaceBuilder<'probe> + 'probe>, DebugProbeError> {
+    ) -> Result<Box<dyn RiscvInterfaceBuilder<'probe> + 'probe>, RiscvError> {
         Ok(Box::new(JtagDtmBuilder::new(self)))
     }
 
@@ -1147,8 +1149,8 @@ impl DebugProbe for BlackMagicProbe {
     /// Turn this probe into an ARM probe
     fn try_get_arm_interface<'probe>(
         mut self: Box<Self>,
-    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
-    {
+        sequence: Arc<dyn ArmDebugSequence>,
+    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
         let has_adiv5 = match self.remote_protocol {
             ProtocolVersion::V0 => false,
             ProtocolVersion::V0P
@@ -1165,9 +1167,12 @@ impl DebugProbe for BlackMagicProbe {
         };
 
         if has_adiv5 {
-            Ok(Box::new(UninitializedBlackMagicArmProbe::new(self)))
+            match BlackMagicProbeArmDebug::new(self, sequence) {
+                Ok(interface) => Ok(Box::new(interface)),
+                Err((probe, err)) => Err((probe.into_probe(), err)),
+            }
         } else {
-            Ok(Box::new(ArmCommunicationInterface::new(self, true)))
+            Ok(ArmCommunicationInterface::create(self, sequence, true)) // TODO: Fixup the error type here
         }
     }
 
@@ -1178,7 +1183,7 @@ impl DebugProbe for BlackMagicProbe {
     fn try_get_xtensa_interface<'probe>(
         &'probe mut self,
         state: &'probe mut XtensaDebugInterfaceState,
-    ) -> Result<XtensaCommunicationInterface<'probe>, DebugProbeError> {
+    ) -> Result<XtensaCommunicationInterface<'probe>, XtensaError> {
         Ok(XtensaCommunicationInterface::new(self, state))
     }
 
@@ -1187,77 +1192,10 @@ impl DebugProbe for BlackMagicProbe {
     }
 }
 
+impl AutoImplementJtagAccess for BlackMagicProbe {}
 impl DapProbe for BlackMagicProbe {}
 
-impl RawProtocolIo for BlackMagicProbe {
-    fn jtag_shift_tms<M>(&mut self, tms: M, _tdi: bool) -> Result<(), DebugProbeError>
-    where
-        M: IntoIterator<Item = bool>,
-    {
-        self.probe_statistics.report_io();
-
-        let tms = tms.into_iter().collect::<Vec<bool>>();
-        let mut accumulator = 0;
-        let mut accumulator_length = 0;
-        for tms in tms.into_iter() {
-            accumulator |= if tms { 1 << accumulator_length } else { 0 };
-            accumulator_length += 1;
-
-            if accumulator_length >= core::mem::size_of_val(&accumulator) * 8 {
-                self.command(RemoteCommand::JtagTms {
-                    bits: accumulator,
-                    length: accumulator_length,
-                })?;
-                accumulator_length = 0;
-                accumulator = 0;
-            }
-        }
-
-        if accumulator_length > 0 {
-            self.command(RemoteCommand::JtagTms {
-                bits: accumulator,
-                length: accumulator_length,
-            })?;
-        }
-
-        Ok(())
-    }
-
-    fn jtag_shift_tdi<I>(&mut self, _tms: bool, tdi: I) -> Result<(), DebugProbeError>
-    where
-        I: IntoIterator<Item = bool>,
-    {
-        self.probe_statistics.report_io();
-
-        let tdi = tdi.into_iter().collect::<Vec<bool>>();
-        let mut accumulator = 0;
-        let mut accumulator_length = 0;
-        for tms in tdi.into_iter() {
-            accumulator |= if tms { 1 << accumulator_length } else { 0 };
-            accumulator_length += 1;
-
-            if accumulator_length >= core::mem::size_of_val(&accumulator) * 8 {
-                self.command(RemoteCommand::JtagTdi {
-                    bits: accumulator,
-                    length: accumulator_length,
-                    tms: false,
-                })?;
-                accumulator_length = 0;
-                accumulator = 0;
-            }
-        }
-
-        if accumulator_length > 0 {
-            self.command(RemoteCommand::JtagTdi {
-                bits: accumulator,
-                length: accumulator_length,
-                tms: false,
-            })?;
-        }
-
-        Ok(())
-    }
-
+impl RawSwdIo for BlackMagicProbe {
     fn swd_io<S>(&mut self, swdio: S) -> Result<Vec<bool>, DebugProbeError>
     where
         S: IntoIterator<Item = IoSequenceItem>,

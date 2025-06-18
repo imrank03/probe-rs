@@ -3,22 +3,22 @@ mod protocol;
 
 use crate::{
     architecture::{
-        arm::communication_interface::UninitializedArmProbe,
-        riscv::{communication_interface::RiscvInterfaceBuilder, dtm::jtag_dtm::JtagDtmBuilder},
+        riscv::{
+            communication_interface::{RiscvError, RiscvInterfaceBuilder},
+            dtm::jtag_dtm::JtagDtmBuilder,
+        },
         xtensa::communication_interface::{
-            XtensaCommunicationInterface, XtensaDebugInterfaceState,
+            XtensaCommunicationInterface, XtensaDebugInterfaceState, XtensaError,
         },
     },
     probe::{
-        DebugProbe, DebugProbeError, DebugProbeInfo, DebugProbeSelector, ProbeFactory,
-        WireProtocol, common::RawJtagIo,
+        AutoImplementJtagAccess, DebugProbe, DebugProbeError, DebugProbeInfo, DebugProbeSelector,
+        JtagAccess, JtagDriverState, ProbeFactory, RawJtagIo, WireProtocol,
     },
 };
 use bitvec::prelude::*;
 
 use self::protocol::ProtocolHandler;
-
-use super::{JTAGAccess, common::JtagDriverState};
 
 /// Probe factory for USB JTAG interfaces built into certain ESP32 chips.
 #[derive(Debug)]
@@ -78,6 +78,8 @@ impl RawJtagIo for EspUsbJtag {
     }
 }
 
+impl AutoImplementJtagAccess for EspUsbJtag {}
+
 impl DebugProbe for EspUsbJtag {
     fn select_protocol(&mut self, protocol: WireProtocol) -> Result<(), DebugProbeError> {
         if matches!(protocol, WireProtocol::Jtag) {
@@ -134,13 +136,13 @@ impl DebugProbe for EspUsbJtag {
         Ok(())
     }
 
-    fn try_as_jtag_probe(&mut self) -> Option<&mut dyn JTAGAccess> {
+    fn try_as_jtag_probe(&mut self) -> Option<&mut dyn JtagAccess> {
         Some(self)
     }
 
     fn try_get_riscv_interface_builder<'probe>(
         &'probe mut self,
-    ) -> Result<Box<dyn RiscvInterfaceBuilder<'probe> + 'probe>, DebugProbeError> {
+    ) -> Result<Box<dyn RiscvInterfaceBuilder<'probe> + 'probe>, RiscvError> {
         Ok(Box::new(JtagDtmBuilder::new(self)))
     }
 
@@ -153,23 +155,10 @@ impl DebugProbe for EspUsbJtag {
         self
     }
 
-    fn try_get_arm_interface<'probe>(
-        self: Box<Self>,
-    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
-    {
-        // This probe cannot debug ARM targets.
-        Err((
-            self,
-            DebugProbeError::InterfaceNotAvailable {
-                interface_name: "SWD/ARM",
-            },
-        ))
-    }
-
     fn try_get_xtensa_interface<'probe>(
         &'probe mut self,
         state: &'probe mut XtensaDebugInterfaceState,
-    ) -> Result<XtensaCommunicationInterface<'probe>, DebugProbeError> {
+    ) -> Result<XtensaCommunicationInterface<'probe>, XtensaError> {
         Ok(XtensaCommunicationInterface::new(self, state))
     }
 

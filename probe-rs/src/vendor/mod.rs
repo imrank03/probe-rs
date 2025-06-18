@@ -18,7 +18,7 @@ use crate::{
         },
     },
     config::{ChipInfo, DebugSequence, Registry},
-    probe::{DebugProbeError, Probe},
+    probe::Probe,
 };
 
 pub mod espressif;
@@ -120,6 +120,9 @@ fn try_detect_arm_chip(
         return Ok((probe, None));
     }
 
+    // We don't know what kind of chip it is, so we use the default sequence.
+    let sequence = DefaultArmSequence::create();
+
     // We have no information about the target, so we must assume it's using the default DP.
     // We cannot automatically detect DPs if SWD multi-drop is used.
     // TODO: collect known DP addresses for known targets.
@@ -127,18 +130,14 @@ fn try_detect_arm_chip(
 
     for dp_address in dp_addresses {
         // TODO: do not consume probe
-        match probe.try_into_arm_interface() {
-            Ok(interface) => {
-                let mut interface =
-                    match interface.initialize(DefaultArmSequence::create(), dp_address) {
-                        Ok(interface) => interface,
-                        Err((interface, error)) => {
-                            probe = interface.close();
-                            tracing::debug!("Error during ARM chip detection: {error}");
-                            // If we can't connect, assume this is not an ARM chip and not an error.
-                            return Ok((probe, None));
-                        }
-                    };
+        match probe.try_into_arm_interface(sequence.clone()) {
+            Ok(mut interface) => {
+                if let Err(error) = interface.select_debug_port(dp_address) {
+                    probe = interface.close();
+                    tracing::debug!("Error during ARM chip detection: {error}");
+                    // If we can't connect, assume this is not an ARM chip and not an error.
+                    return Ok((probe, None));
+                }
 
                 let found_arm_chip = read_chip_info_from_rom_table(interface.as_mut(), dp_address)
                     .unwrap_or_else(|error| {
@@ -180,6 +179,11 @@ fn try_detect_arm_chip(
 fn try_detect_riscv_chip(registry: &Registry, probe: &mut Probe) -> Result<Option<Target>, Error> {
     let mut found_target = None;
 
+    if !probe.has_riscv_interface() {
+        tracing::debug!("No RISC-V interface available, skipping detection.");
+        return Ok(None);
+    }
+
     if let Some(probe) = probe.try_as_jtag_probe() {
         _ = probe.select_target(0);
     }
@@ -215,10 +219,6 @@ fn try_detect_riscv_chip(registry: &Registry, probe: &mut Probe) -> Result<Optio
             // TODO: disable debug module
         }
 
-        Err(DebugProbeError::InterfaceNotAvailable { .. }) => {
-            tracing::debug!("No RISC-V interface available, skipping detection.");
-        }
-
         Err(error) => {
             tracing::debug!("Error during RISC-V chip detection: {error}");
         }
@@ -229,6 +229,11 @@ fn try_detect_riscv_chip(registry: &Registry, probe: &mut Probe) -> Result<Optio
 
 fn try_detect_xtensa_chip(registry: &Registry, probe: &mut Probe) -> Result<Option<Target>, Error> {
     let mut found_target = None;
+
+    if !probe.has_xtensa_interface() {
+        tracing::debug!("No Xtensa interface available, skipping detection.");
+        return Ok(None);
+    }
 
     if let Some(probe) = probe.try_as_jtag_probe() {
         _ = probe.select_target(0);
@@ -260,10 +265,6 @@ fn try_detect_xtensa_chip(registry: &Registry, probe: &mut Probe) -> Result<Opti
             }
 
             interface.leave_debug_mode()?;
-        }
-
-        Err(DebugProbeError::InterfaceNotAvailable { .. }) => {
-            tracing::debug!("No Xtensa interface available, skipping detection.");
         }
 
         Err(error) => {

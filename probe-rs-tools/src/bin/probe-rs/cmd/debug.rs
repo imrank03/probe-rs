@@ -28,6 +28,7 @@ use super::dap_server::debug_adapter::dap::dap_types::Response;
 struct Shared {
     stop: bool,
     next_request: Option<Request>,
+    seq: i64,
 }
 
 /// A barebones adapter for the CLI "client".
@@ -78,9 +79,9 @@ impl ProtocolAdapter for CliAdapter {
         Ok(())
     }
 
-    fn send_raw_response(&mut self, response: &Response) -> anyhow::Result<()> {
+    fn send_raw_response(&mut self, response: Response) -> anyhow::Result<()> {
         if !response.success {
-            print_error(response)?;
+            print_error(&response)?;
             return Ok(());
         }
 
@@ -117,6 +118,11 @@ impl ProtocolAdapter for CliAdapter {
 
     fn console_log_level(&self) -> ConsoleLog {
         self.console_log_level
+    }
+
+    fn get_next_seq(&mut self) -> i64 {
+        self.shared.borrow_mut().seq += 1;
+        self.shared.borrow().seq
     }
 }
 
@@ -186,6 +192,7 @@ impl Cmd {
         let shared = Rc::new(RefCell::new(Shared {
             stop: false,
             next_request: None,
+            seq: 0,
         }));
         let mut debug_adapter = DebugAdapter::new(CliAdapter {
             shared: shared.clone(),
@@ -252,8 +259,9 @@ impl Cmd {
         // A bit weird since we need the request to be removable,
         // but we also need to pass it directly.
         shared.borrow_mut().next_request = Some(attach_request.clone());
-        let mut session_data =
-            debugger.handle_launch_attach(registry, &attach_request, &mut debug_adapter, lister)?;
+        let mut session_data = debugger
+            .handle_launch_attach(registry, &attach_request, &mut debug_adapter, lister)
+            .await?;
 
         shared.borrow_mut().next_request = Some(Request {
             command: "configurationDone".to_string(),

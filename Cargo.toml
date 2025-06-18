@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.27.0"
+version = "0.29.0"
 edition = "2024"
 
 documentation = "https://docs.rs/probe-rs/"
@@ -25,13 +25,15 @@ members = [
 exclude = ["probe-rs/tests/gpio-hal-blinky"]
 
 [workspace.dependencies]
-probe-rs = { path = "probe-rs", version = "0.27.0" }
-probe-rs-target = { path = "probe-rs-target", version = "0.27.0" }
+probe-rs = { path = "probe-rs", version = "0.29.0" }
+probe-rs-target = { path = "probe-rs-target", version = "0.29.0" }
 probe-rs-mi = { path = "probe-rs-mi", version = "0.1.0" }
 
 docsplay = "0.1.1"
 thiserror = "2.0.11"
 anyhow = "1.0.82"
+async-trait = "0.1"
+async-io = "2"
 
 [workspace.metadata.release]
 shared-version = true
@@ -46,6 +48,17 @@ macro_use_imports = "deny"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[profile.dev]
+# Keep stack trace data, but no other debug info by default.
+# See https://kobzol.github.io/rust/rustc/2025/05/20/disable-debuginfo-to-improve-rust-compile-times.html
+# If you have difficulty debugging probe-rs, remove this line temporarily.
+debug = "line-tables-only"
+
+[profile.release]
+# For release builds the default is no debuginfo. Let's instead keep the
+# line tables for better backtraces.
+debug = "line-tables-only"
 
 [profile.dev.package.zip]
 # Set the default for zip in development mode so the creation of the zip does not take forever

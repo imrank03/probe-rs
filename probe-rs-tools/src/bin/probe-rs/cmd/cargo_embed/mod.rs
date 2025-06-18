@@ -45,7 +45,7 @@ use crate::util::{cargo::build_artifact, common_options::CargoOptions, logging};
 struct CliOptions {
     /// Name of the configuration profile to use.
     #[arg()]
-    config: Option<String>,
+    config_profile: Option<String>,
     /// Path of a configuration file outside the default path.
     ///
     /// When this is set, the default path is still considered, but the given file is considered
@@ -123,7 +123,7 @@ async fn main_try(args: &[OsString], offset: UtcOffset) -> Result<()> {
     let work_dir = std::env::current_dir()?;
 
     // Get the config.
-    let config_name = opt.config.as_deref().unwrap_or("default");
+    let profile_name = opt.config_profile.as_deref().unwrap_or("default");
     let mut configs = config::Configs::new(work_dir.clone());
     if let Some(config_file) = opt.config_file {
         let config_file = PathBuf::from(config_file);
@@ -134,7 +134,7 @@ async fn main_try(args: &[OsString], offset: UtcOffset) -> Result<()> {
         }
         configs.merge(config_file)?;
     }
-    let config = configs.select_defined(config_name)?;
+    let config = configs.select_defined(profile_name)?;
 
     let _log_guard = setup_logging(None, config.general.log_level);
 
@@ -167,9 +167,13 @@ async fn main_try(args: &[OsString], offset: UtcOffset) -> Result<()> {
         )
     })?;
 
-    logging::println(format!("      {} {}", "Config".green().bold(), config_name));
     logging::println(format!(
         "      {} {}",
+        "Profile".green().bold(),
+        profile_name
+    ));
+    logging::println(format!(
+        "       {} {}",
         "Target".green().bold(),
         path.display()
     ));
@@ -215,7 +219,10 @@ async fn main_try(args: &[OsString], offset: UtcOffset) -> Result<()> {
     };
 
     let lister = Lister::new();
-    let (mut session, probe_options) = match probe_options.simple_attach(&mut registry, &lister) {
+    let (mut session, probe_options) = match probe_options
+        .simple_attach(&mut registry, &lister)
+        .await
+    {
         Ok((session, probe_options)) => (session, probe_options),
 
         Err(OperationError::MultipleProbesFound { list }) => {
@@ -273,7 +280,7 @@ async fn main_try(args: &[OsString], offset: UtcOffset) -> Result<()> {
         ScanRegion::Ram
     };
 
-    let mut rtt_client = RttClient::new(create_rtt_config(&config).clone(), scan);
+    let mut rtt_client = RttClient::new(create_rtt_config(&config).clone(), scan, session.target());
 
     // FIXME: we should probably figure out in a different way which core we can work with.
     // It seems arbitrary that we reset the target using the same core we use for polling RTT.
@@ -342,7 +349,7 @@ async fn main_try(args: &[OsString], offset: UtcOffset) -> Result<()> {
                 gdb_connection_string.as_deref().unwrap_or("127.0.0.1:1337");
 
             logging::println(format!(
-                "    {} listening at {}",
+                "     {} listening at {}",
                 "GDB stub".green().bold(),
                 gdb_connection_string,
             ));
@@ -377,9 +384,9 @@ async fn main_try(args: &[OsString], offset: UtcOffset) -> Result<()> {
     }
 
     logging::println(format!(
-        "        {} processing config {}",
+        "        {} processing config profile {}",
         "Done".green().bold(),
-        config_name
+        profile_name,
     ));
 
     Ok(())

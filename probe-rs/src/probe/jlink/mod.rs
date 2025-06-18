@@ -10,7 +10,7 @@ mod speed;
 pub mod swo;
 
 use std::fmt;
-use std::iter;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bitvec::prelude::*;
@@ -25,29 +25,28 @@ use self::error::JlinkError;
 use self::interface::{Interface, Interfaces};
 use self::speed::SpeedConfig;
 use self::swo::SwoMode;
-use crate::architecture::arm::{ArmError, Pins};
+use crate::architecture::arm::sequences::ArmDebugSequence;
+use crate::architecture::arm::{ArmError, ArmProbeInterface, Pins};
+use crate::architecture::riscv::communication_interface::RiscvError;
 use crate::architecture::xtensa::communication_interface::{
-    XtensaCommunicationInterface, XtensaDebugInterfaceState,
+    XtensaCommunicationInterface, XtensaDebugInterfaceState, XtensaError,
 };
-use crate::probe::JTAGAccess;
-use crate::probe::common::{JtagDriverState, RawJtagIo};
 use crate::probe::jlink::bits::IteratorExt;
 use crate::probe::jlink::config::JlinkConfig;
 use crate::probe::jlink::connection::JlinkConnection;
 use crate::probe::usb_util::InterfaceExt;
+use crate::probe::{AutoImplementJtagAccess, JtagAccess};
 use crate::{
     architecture::{
         arm::{
-            ArmCommunicationInterface, SwoAccess,
-            communication_interface::{DapProbe, UninitializedArmProbe},
-            swo::SwoConfig,
+            ArmCommunicationInterface, SwoAccess, communication_interface::DapProbe, swo::SwoConfig,
         },
         riscv::{communication_interface::RiscvInterfaceBuilder, dtm::jtag_dtm::JtagDtmBuilder},
     },
     probe::{
-        DebugProbe, DebugProbeError, DebugProbeInfo, DebugProbeSelector, ProbeFactory,
+        DebugProbe, DebugProbeError, DebugProbeInfo, DebugProbeSelector, IoSequenceItem,
+        JtagDriverState, ProbeFactory, ProbeStatistics, RawJtagIo, RawSwdIo, SwdSettings,
         WireProtocol,
-        arm_debug_interface::{IoSequenceItem, ProbeStatistics, RawProtocolIo, SwdSettings},
     },
 };
 
@@ -1084,20 +1083,21 @@ impl DebugProbe for JLink {
         Ok(())
     }
 
-    fn try_as_jtag_probe(&mut self) -> Option<&mut dyn JTAGAccess> {
+    fn try_as_jtag_probe(&mut self) -> Option<&mut dyn JtagAccess> {
         Some(self)
     }
 
     fn try_get_riscv_interface_builder<'probe>(
         &'probe mut self,
-    ) -> Result<Box<dyn RiscvInterfaceBuilder<'probe> + 'probe>, DebugProbeError> {
+    ) -> Result<Box<dyn RiscvInterfaceBuilder<'probe> + 'probe>, RiscvError> {
         if self.supported_protocols.contains(&WireProtocol::Jtag) {
             self.select_protocol(WireProtocol::Jtag)?;
             Ok(Box::new(JtagDtmBuilder::new(self)))
         } else {
             Err(DebugProbeError::InterfaceNotAvailable {
                 interface_name: "JTAG",
-            })
+            }
+            .into())
         }
     }
 
@@ -1127,11 +1127,9 @@ impl DebugProbe for JLink {
 
     fn try_get_arm_interface<'probe>(
         self: Box<Self>,
-    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
-    {
-        let uninitialized_interface = ArmCommunicationInterface::new(self, true);
-
-        Ok(Box::new(uninitialized_interface))
+        sequence: Arc<dyn ArmDebugSequence>,
+    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
+        Ok(ArmCommunicationInterface::create(self, sequence, true))
     }
 
     fn get_target_voltage(&mut self) -> Result<Option<f32>, DebugProbeError> {
@@ -1142,14 +1140,15 @@ impl DebugProbe for JLink {
     fn try_get_xtensa_interface<'probe>(
         &'probe mut self,
         state: &'probe mut XtensaDebugInterfaceState,
-    ) -> Result<XtensaCommunicationInterface<'probe>, DebugProbeError> {
+    ) -> Result<XtensaCommunicationInterface<'probe>, XtensaError> {
         if self.supported_protocols.contains(&WireProtocol::Jtag) {
             self.select_protocol(WireProtocol::Jtag)?;
             Ok(XtensaCommunicationInterface::new(self, state))
         } else {
             Err(DebugProbeError::InterfaceNotAvailable {
                 interface_name: "JTAG",
-            })
+            }
+            .into())
         }
     }
 
@@ -1158,39 +1157,7 @@ impl DebugProbe for JLink {
     }
 }
 
-impl RawProtocolIo for JLink {
-    fn jtag_shift_tms<M>(&mut self, tms: M, tdi: bool) -> Result<(), DebugProbeError>
-    where
-        M: IntoIterator<Item = bool>,
-    {
-        assert!(
-            self.protocol != WireProtocol::Swd,
-            "Logic error, requested jtag_io when in SWD mode"
-        );
-
-        self.probe_statistics.report_io();
-
-        self.shift_bits(tms, iter::repeat(tdi), iter::repeat(false))?;
-
-        Ok(())
-    }
-
-    fn jtag_shift_tdi<I>(&mut self, tms: bool, tdi: I) -> Result<(), DebugProbeError>
-    where
-        I: IntoIterator<Item = bool>,
-    {
-        assert!(
-            self.protocol != WireProtocol::Swd,
-            "Logic error, requested jtag_io when in SWD mode"
-        );
-
-        self.probe_statistics.report_io();
-
-        self.shift_bits(iter::repeat(tms), tdi, iter::repeat(false))?;
-
-        Ok(())
-    }
-
+impl RawSwdIo for JLink {
     fn swd_io<S>(&mut self, swdio: S) -> Result<Vec<bool>, DebugProbeError>
     where
         S: IntoIterator<Item = IoSequenceItem>,
@@ -1260,6 +1227,7 @@ impl RawJtagIo for JLink {
     }
 }
 
+impl AutoImplementJtagAccess for JLink {}
 impl DapProbe for JLink {}
 
 impl SwoAccess for JLink {

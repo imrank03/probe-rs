@@ -6,25 +6,28 @@ use crate::{
     CoreStatus,
     architecture::{
         arm::{
-            ArmCommunicationInterface, ArmError, DapError, Pins, RawDapAccess, RegisterAddress,
-            SwoAccess, SwoConfig, SwoMode,
-            communication_interface::{DapProbe, UninitializedArmProbe},
+            ArmCommunicationInterface, ArmError, ArmProbeInterface, DapError, Pins, RawDapAccess,
+            RegisterAddress, SwoAccess, SwoConfig, SwoMode,
+            communication_interface::DapProbe,
             dp::{Abort, Ctrl, DpRegister},
+            sequences::ArmDebugSequence,
             swo::poll_interval_from_buf_size,
         },
-        riscv::{communication_interface::RiscvInterfaceBuilder, dtm::jtag_dtm::JtagDtmBuilder},
+        riscv::{
+            communication_interface::{RiscvError, RiscvInterfaceBuilder},
+            dtm::jtag_dtm::JtagDtmBuilder,
+        },
         xtensa::communication_interface::{
-            XtensaCommunicationInterface, XtensaDebugInterfaceState,
+            XtensaCommunicationInterface, XtensaDebugInterfaceState, XtensaError,
         },
     },
     probe::{
-        BatchCommand, DebugProbe, DebugProbeError, DebugProbeInfo, DebugProbeSelector, JTAGAccess,
-        ProbeFactory, WireProtocol,
+        AutoImplementJtagAccess, BatchCommand, DebugProbe, DebugProbeError, DebugProbeInfo,
+        DebugProbeSelector, JtagAccess, JtagDriverState, ProbeFactory, WireProtocol,
         cmsisdap::commands::{
             CmsisDapError, RequestError,
             general::info::{CapabilitiesCommand, PacketCountCommand, SWOTraceBufferSizeCommand},
         },
-        common::JtagDriverState,
     },
 };
 
@@ -59,7 +62,7 @@ use commands::{
 };
 use probe_rs_target::ScanChainElement;
 
-use std::{fmt::Write, time::Duration};
+use std::{fmt::Write, sync::Arc, time::Duration};
 
 use bitvec::prelude::*;
 
@@ -77,9 +80,9 @@ impl std::fmt::Display for CmsisDapFactory {
 
 impl ProbeFactory for CmsisDapFactory {
     fn open(&self, selector: &DebugProbeSelector) -> Result<Box<dyn DebugProbe>, DebugProbeError> {
-        Ok(Box::new(CmsisDap::new_from_device(
-            tools::open_device_from_selector(selector)?,
-        )?))
+        CmsisDap::new_from_device(tools::open_device_from_selector(selector)?)
+            .map(Box::new)
+            .map(DebugProbe::into_probe)
     }
 
     fn list_probes(&self) -> Vec<DebugProbeInfo> {
@@ -780,6 +783,16 @@ impl CmsisDap {
         // Store the actually used protocol, to handle cases where the default protocol is used.
         tracing::info!("Using protocol {}", used_protocol);
         self.protocol = Some(used_protocol);
+
+        // If operating under JTAG, try to bring the JTAG machinery out of reset. Ignore errors
+        // since not all probes support this.
+        if matches!(self.protocol, Some(WireProtocol::Jtag)) {
+            commands::send_command(
+                &mut self.device,
+                &SWJPinsRequestBuilder::new().ntrst(true).build(),
+            )
+            .ok();
+        }
         self.connected = true;
 
         Ok(())
@@ -921,9 +934,9 @@ impl DebugProbe for CmsisDap {
 
     fn try_get_arm_interface<'probe>(
         self: Box<Self>,
-    ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
-    {
-        Ok(Box::new(ArmCommunicationInterface::new(self, false)))
+        sequence: Arc<dyn ArmDebugSequence>,
+    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
+        Ok(ArmCommunicationInterface::create(self, sequence, false))
     }
 
     fn has_arm_interface(&self) -> bool {
@@ -934,7 +947,7 @@ impl DebugProbe for CmsisDap {
         self
     }
 
-    fn try_as_jtag_probe(&mut self) -> Option<&mut dyn JTAGAccess> {
+    fn try_as_jtag_probe(&mut self) -> Option<&mut dyn JtagAccess> {
         Some(self)
     }
 
@@ -949,14 +962,14 @@ impl DebugProbe for CmsisDap {
 
     fn try_get_riscv_interface_builder<'probe>(
         &'probe mut self,
-    ) -> Result<Box<dyn RiscvInterfaceBuilder<'probe> + 'probe>, DebugProbeError> {
+    ) -> Result<Box<dyn RiscvInterfaceBuilder<'probe> + 'probe>, RiscvError> {
         Ok(Box::new(JtagDtmBuilder::new(self)))
     }
 
     fn try_get_xtensa_interface<'probe>(
         &'probe mut self,
         state: &'probe mut XtensaDebugInterfaceState,
-    ) -> Result<XtensaCommunicationInterface<'probe>, DebugProbeError> {
+    ) -> Result<XtensaCommunicationInterface<'probe>, XtensaError> {
         Ok(XtensaCommunicationInterface::new(self, state))
     }
 
@@ -964,6 +977,9 @@ impl DebugProbe for CmsisDap {
         true
     }
 }
+
+// TODO: we will want to replace the default implementation with one that can use vendor extensions.
+impl AutoImplementJtagAccess for CmsisDap {}
 
 impl RawDapAccess for CmsisDap {
     fn core_status_notification(&mut self, status: CoreStatus) -> Result<(), DebugProbeError> {

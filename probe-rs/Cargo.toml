@@ -30,6 +30,8 @@ test = []
 
 [dependencies]
 anyhow.workspace = true
+async-io.workspace = true
+async-trait.workspace = true
 docsplay.workspace = true
 thiserror.workspace = true
 probe-rs-target.workspace = true
@@ -42,17 +44,16 @@ hidapi = { version = "2", default-features = false, features = [
 ] }
 ihex = "3.0"
 itertools = "0.14"
-jep106 = "0.2"
+jep106 = "0.3"
 flate2 = "1.0"
-object = { version = "0.36", default-features = false, features = [
+object = { version = "0.37", default-features = false, features = [
     "elf",
     "read_core",
     "std",
 ] }
 nusb = "0.1.12"
 futures-lite = { version = "2", default-features = false }
-async-io = "2"
-scroll = "0.12"
+scroll = "0.13"
 serialport = { version = "4.6.0", default-features = false, features = [
     "usbportinfo-interface",
 ] }
@@ -61,6 +62,7 @@ uf2-decode = "0.2"
 espflash = { version = "3", default-features = false }
 parking_lot = "0.12.2"
 zerocopy = { version = "0.8.0", features = ["derive"] }
+cobs = "0.3"
 
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
@@ -87,7 +89,6 @@ itm = { version = "0.9.0-rc.1", default-features = false }
 pretty_assertions = "1"
 test-case = "3"
 test-log = { version = "0.2.16", features = ["trace"] }
-termtree = "0.5"
 insta = { version = "1.38", default-features = false }
 
 [[package.metadata.release.pre-release-replacements]]

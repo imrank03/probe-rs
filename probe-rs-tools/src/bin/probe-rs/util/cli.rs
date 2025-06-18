@@ -13,6 +13,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender};
 use tokio_util::sync::CancellationToken;
 
+use crate::rpc::functions::monitor::MonitorExitReason;
 use crate::{
     FormatOptions,
     rpc::{
@@ -443,11 +444,65 @@ pub async fn monitor(
     })
     .await;
 
+    let print_stack_trace = match &result {
+        Ok(MonitorExitReason::Success | MonitorExitReason::SemihostingExit(Ok(_))) => {
+            println!("Firmware exited successfully");
+            print_stack_trace // On success, we only print if the user asked for it.
+        }
+        Ok(MonitorExitReason::UserExit) => {
+            println!("Exited by user request");
+            print_stack_trace // On ctrl-c, we only print if the user asked for it.
+        }
+        Ok(MonitorExitReason::UnexpectedExit(reason)) => {
+            println!("Firmware exited unexpectedly: {reason}");
+            true
+        }
+        Ok(MonitorExitReason::SemihostingExit(Err(details))) => {
+            let reason = match details.reason {
+                // HW vector reason codes
+                0x20000 => String::from("Branch through zero"),
+                0x20001 => String::from("Undefined instrution"),
+                0x20002 => String::from("Software interrupt"),
+                0x20003 => String::from("Prefetch abort"),
+                0x20004 => String::from("Data abort"),
+                0x20005 => String::from("Address exception"),
+                0x20006 => String::from("IRQ"),
+                0x20007 => String::from("FIQ"),
+                // SW reason codes
+                0x20020 => String::from("Breakpoint"),
+                0x20021 => String::from("Watchpoint"),
+                0x20022 => String::from("Step complete"),
+                0x20023 => String::from("Unknown runtime error"),
+                0x20024 => String::from("Internal error"),
+                0x20025 => String::from("User interruption"),
+                0x20026 => String::from("Application exit"),
+                0x20027 => String::from("Stack overflow"),
+                0x20028 => String::from("Division by zero"),
+                0x20029 => String::from("OS specific error"),
+                other => format!("Unknown exit reason {other}"),
+            };
+
+            let subcode = match details.reason {
+                0x20026 => match details.subcode {
+                    Some(134) => String::from(" (Aborted)"),
+                    Some(other) => format!(" (Unknown exit code {other})"),
+                    None => String::from(""),
+                },
+                _ => String::from(""),
+            };
+
+            println!("Firmware exited with: {}{}", reason, subcode);
+
+            true
+        }
+        Err(_) => false, // Some irrecoverable error happened, probably can't print the stack trace.
+    };
+
     if print_stack_trace {
         display_stack_trace(session, path).await?;
     }
 
-    result
+    result.map(|_| ())
 }
 
 pub async fn test(
@@ -626,26 +681,27 @@ impl CliRttClient {
 
         // Apply our heuristics based on channel names.
         for channel in up_channels.iter() {
-            let decoder = if channel == "defmt" {
-                if let Some(defmt_data) = self.defmt_data.clone() {
-                    RttDecoder::Defmt {
-                        processor: DefmtProcessor::new(
-                            defmt_data,
-                            self.timestamp_offset.is_some(),
-                            self.show_location,
-                            self.log_format.as_deref(),
-                        ),
+            let decoder =
+                if channel == "defmt" || (self.defmt_data.is_some() && up_channels.len() == 1) {
+                    if let Some(defmt_data) = self.defmt_data.clone() {
+                        RttDecoder::Defmt {
+                            processor: DefmtProcessor::new(
+                                defmt_data,
+                                self.timestamp_offset.is_some(),
+                                self.show_location,
+                                self.log_format.as_deref(),
+                            ),
+                        }
+                    } else {
+                        // Not much we can do. Don't silently eat the data.
+                        RttDecoder::BinaryLE
                     }
                 } else {
-                    // Not much we can do. Don't silently eat the data.
-                    RttDecoder::BinaryLE
-                }
-            } else {
-                RttDecoder::String {
-                    timestamp_offset: self.timestamp_offset,
-                    last_line_done: false,
-                }
-            };
+                    RttDecoder::String {
+                        timestamp_offset: self.timestamp_offset,
+                        last_line_done: false,
+                    }
+                };
 
             self.channel_processors
                 .push(Channel::new(channel.clone(), decoder));

@@ -173,6 +173,15 @@ impl InstructionSet {
     }
 }
 
+/// The current endianness of a core
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Endian {
+    /// Little endian mode -- this is the most common mode
+    Little,
+    /// Big endian mode -- this is common on network hardware
+    Big,
+}
+
 /// This describes a chip family with all its variants.
 ///
 /// This struct is usually read from a target description
@@ -219,7 +228,7 @@ impl ChipFamily {
     /// This method should be called right after the [`ChipFamily`] is created!
     pub fn validate(&self) -> Result<(), String> {
         self.reject_duplicate_target_names()?;
-        self.ensure_algorithms_exists()?;
+        self.ensure_algorithms_exist()?;
         self.ensure_at_least_one_core()?;
         self.reject_incorrect_core_access_options()?;
         self.validate_memory_regions()?;
@@ -248,7 +257,7 @@ impl ChipFamily {
     }
 
     /// Make sure the algorithms used on the variant actually exist on the family (this is basically a check for typos).
-    fn ensure_algorithms_exists(&self) -> Result<(), String> {
+    fn ensure_algorithms_exist(&self) -> Result<(), String> {
         for variant in &self.variants {
             for algorithm_name in variant.flash_algorithms.iter() {
                 if !self
@@ -257,8 +266,10 @@ impl ChipFamily {
                     .any(|algorithm| &algorithm.name == algorithm_name)
                 {
                     return Err(format!(
-                        "unknown flash algorithm `{}` for variant `{}`",
-                        algorithm_name, variant.name
+                        "The chip variant {chip_name} refers to a flash algorithm {algorithm_name}, \
+                        which is not defined in the {family_name} family.",
+                        chip_name = variant.name,
+                        family_name = self.name,
                     ));
                 }
             }
@@ -347,6 +358,13 @@ impl ChipFamily {
                 .iter()
                 .map(|core| &core.name)
                 .collect::<Vec<_>>();
+
+            if variant.memory_map.is_empty() && self.source != TargetDescriptionSource::Generic {
+                return Err(format!(
+                    "Variant {} does not contain any memory regions",
+                    variant.name
+                ));
+            }
 
             for memory in &variant.memory_map {
                 for core in memory.cores() {

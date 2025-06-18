@@ -4,8 +4,6 @@ use std::{convert::Infallible, future::Future};
 use crate::rpc::functions::file::{
     AppendFileRequest, CreateFileResponse, append_temp_file, create_temp_file,
 };
-use crate::rpc::functions::probe::{SelectProbeRequest, SelectProbeResponse, select_probe};
-use crate::rpc::transport::memory::{WireRx, WireTx};
 use crate::{
     rpc::{
         Key, SessionState,
@@ -20,10 +18,10 @@ use crate::{
             },
             info::{InfoEvent, TargetInfoRequest, target_info},
             memory::{ReadMemoryRequest, WriteMemoryRequest, read_memory, write_memory},
-            monitor::{MonitorRequest, RttEvent, SemihostingEvent, monitor},
+            monitor::{MonitorRequest, MonitorResponse, RttEvent, SemihostingEvent, monitor},
             probe::{
-                AttachRequest, AttachResponse, ListProbesRequest, ListProbesResponse, attach,
-                list_probes,
+                AttachRequest, AttachResponse, ListProbesRequest, ListProbesResponse,
+                SelectProbeRequest, SelectProbeResponse, attach, list_probes, select_probe,
             },
             reset::{ResetCoreRequest, reset},
             resume::{ResumeAllCoresRequest, resume_all_cores},
@@ -34,6 +32,7 @@ use crate::{
                 run_test,
             },
         },
+        transport::memory::{WireRx, WireTx},
     },
     util::common_options::OperationError,
 };
@@ -286,19 +285,21 @@ impl LimitedLister {
     }
 }
 
+#[async_trait::async_trait]
 impl ProbeLister for LimitedLister {
-    fn open(&self, selector: &DebugProbeSelector) -> Result<Probe, DebugProbeError> {
+    async fn open(&self, selector: &DebugProbeSelector) -> Result<Probe, DebugProbeError> {
         if !self.is_allowed(selector) {
             return Err(DebugProbeError::ProbeCouldNotBeCreated(
                 ProbeCreationError::CouldNotOpen,
             ));
         }
-        self.all_probes.open(selector)
+        self.all_probes.open(selector).await
     }
 
-    fn list(&self, selector: Option<&DebugProbeSelector>) -> Vec<DebugProbeInfo> {
+    async fn list(&self, selector: Option<&DebugProbeSelector>) -> Vec<DebugProbeInfo> {
         self.all_probes
             .list(selector)
+            .await
             .into_iter()
             .filter(|info| self.is_allowed(&DebugProbeSelector::from(info)))
             .collect()
@@ -467,7 +468,7 @@ endpoints! {
     | FlashEndpoint             | FlashRequest           | NoResponse              | "flash/flash"      |
     | EraseEndpoint             | EraseRequest           | NoResponse              | "flash/erase"      |
     | VerifyEndpoint            | VerifyRequest          | VerifyResponse          | "flash/verify"     |
-    | MonitorEndpoint           | MonitorRequest         | NoResponse              | "monitor"          |
+    | MonitorEndpoint           | MonitorRequest         | MonitorResponse         | "monitor"          |
 
     | ListTestsEndpoint         | ListTestsRequest       | ListTestsResponse       | "tests/list"       |
     | RunTestEndpoint           | RunTestRequest         | RunTestResponse         | "tests/run"        |
@@ -524,7 +525,7 @@ postcard_rpc::define_dispatch! {
 
         | EndpointTy                | kind      | handler           |
         | ----------                | ----      | -------           |
-        | ListProbesEndpoint        | blocking  | list_probes       |
+        | ListProbesEndpoint        | async     | list_probes       |
         | SelectProbeEndpoint       | async     | select_probe      |
         | AttachEndpoint            | async     | attach            |
 

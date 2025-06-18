@@ -327,12 +327,15 @@ impl Debugger {
         };
 
         // Process either the Launch or Attach request.
-        let mut session_data = match self.handle_launch_attach(
-            &mut registry,
-            &launch_attach_request,
-            &mut debug_adapter,
-            lister,
-        ) {
+        let mut session_data = match self
+            .handle_launch_attach(
+                &mut registry,
+                &launch_attach_request,
+                &mut debug_adapter,
+                lister,
+            )
+            .await
+        {
             Ok(session_data) => session_data,
             Err(error) => {
                 debug_adapter.send_response::<()>(&launch_attach_request, Err(&error))?;
@@ -370,8 +373,9 @@ impl Debugger {
                     }
                 }
                 DebugSessionStatus::Restart(request) => {
-                    if let Err(error) =
-                        self.restart(&mut debug_adapter, &mut session_data, &request)
+                    if let Err(error) = self
+                        .restart(&mut debug_adapter, &mut session_data, &request)
+                        .await
                     {
                         debug_adapter.send_response::<()>(&request, Err(&error))?;
                         return Err(error);
@@ -400,7 +404,7 @@ impl Debugger {
 
     /// Process launch or attach request
     #[tracing::instrument(skip_all, name = "Handle Launch/Attach Request")]
-    pub(crate) fn handle_launch_attach<P: ProtocolAdapter + 'static>(
+    pub(crate) async fn handle_launch_attach<P: ProtocolAdapter + 'static>(
         &mut self,
         registry: &mut Registry,
         launch_attach_request: &Request,
@@ -428,7 +432,7 @@ impl Debugger {
         self.config.validate_config_files()?;
 
         let mut session_data =
-            SessionData::new(registry, lister, &mut self.config, self.timestamp_offset)?;
+            SessionData::new(registry, lister, &mut self.config, self.timestamp_offset).await?;
 
         debug_adapter.halt_after_reset = self.config.flashing_config.halt_after_reset;
 
@@ -491,6 +495,10 @@ impl Debugger {
 
         drop(target_core);
 
+        // Poll cores once while still halted. This will ensure that the RTT control block is
+        // cleared even when haltAfterReset = false.
+        session_data.poll_cores(&self.config, debug_adapter).await?;
+
         debug_adapter.send_response::<()>(launch_attach_request, Ok(None))?;
         self.debug_logger.flush_to_dap(debug_adapter)?;
 
@@ -498,7 +506,7 @@ impl Debugger {
     }
 
     #[tracing::instrument(skip_all)]
-    fn restart<P: ProtocolAdapter + 'static>(
+    async fn restart<P: ProtocolAdapter + 'static>(
         &mut self,
         debug_adapter: &mut DebugAdapter<P>,
         session_data: &mut SessionData,
@@ -523,11 +531,7 @@ impl Debugger {
                 session_data.load_debug_info_for_core(target_core_config)?;
                 session_data
                     .attach_core(target_core_config.core_index)
-                    .map(|mut target_core| {
-                        // Reset RTT so that the link can be re-established
-                        target_core.core_data.rtt_connection = None;
-                        target_core.recompute_breakpoints()
-                    })??;
+                    .map(|mut target_core| target_core.recompute_breakpoints())??;
 
                 session_data.load_rtt_location(&self.config)?;
 
@@ -546,6 +550,19 @@ impl Debugger {
 
         // Immediately after attaching, halt the core, so that we can finish restart logic without bumping into user code.
         halt_core(&mut target_core.core)?;
+
+        // Reset RTT so that the link can be re-established and the control block cleared.
+        target_core.core_data.rtt_connection = None;
+
+        // We can't keep the reference for borrow checker reasons.
+        drop(target_core);
+
+        // Poll cores once while still halted. This will ensure that the RTT control block is
+        // cleared even when haltAfterReset = false.
+        session_data.poll_cores(&self.config, debug_adapter).await?;
+
+        // Re-attach
+        let mut target_core = session_data.attach_core(target_core_config.core_index)?;
 
         // After completing optional flashing and other config, we can run the debug adapter's restart logic.
         debug_adapter
@@ -1159,7 +1176,7 @@ mod test {
             self.console_log_level
         }
 
-        fn send_raw_response(&mut self, response: &Response) -> anyhow::Result<()> {
+        fn send_raw_response(&mut self, response: Response) -> anyhow::Result<()> {
             if self.response_index >= self.expected_responses.len() {
                 panic!("No more responses expected, but got {response:?}");
             }
@@ -1182,6 +1199,11 @@ mod test {
 
         fn remove_pending_request(&mut self, request_seq: i64) -> Option<String> {
             self.pending_requests.remove(&request_seq)
+        }
+
+        fn get_next_seq(&mut self) -> i64 {
+            self.sequence_number += 1;
+            self.sequence_number
         }
     }
 
@@ -1273,7 +1295,7 @@ mod test {
 
         let lister = TestLister::new();
         if with_probe {
-            lister.probes.borrow_mut().push(fake_probe());
+            lister.probes.lock().await.push(fake_probe());
         }
         let lister = Lister::with_lister(Box::new(lister));
 

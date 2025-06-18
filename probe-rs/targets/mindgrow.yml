@@ -1,6 +1,6 @@
 name: mindgrow
 manufacturer:
-  id: 0x100039D3
+  id: 0x9
   cc: 0x9
 variants:
 - name: shakthi-v

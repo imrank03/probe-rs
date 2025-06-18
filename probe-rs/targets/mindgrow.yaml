@@ -11,14 +11,14 @@ variants:
   memory_map:
   - !Nvm
     range:
-      start: 0x0
-      end: 0x2000
+      start: 0x20000000
+      end: 0x40000000
     cores:
     - main
   - !Ram
     range:
-      start: 0x10000
-      end: 0x20000
+      start: 0x80000000
+      end: 0x80004000
     cores:
     - main
     access:
@@ -38,7 +38,7 @@ flash_algorithms:
   flash_properties:
     address_range:
       start: 0x20000000
-      end: 0x22000000
+      end: 0x40000000
     page_size: 0x100
     erased_byte_value: 0xff
     program_page_timeout: 1000

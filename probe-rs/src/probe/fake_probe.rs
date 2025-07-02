@@ -1,8 +1,8 @@
-#![allow(missing_docs)] // Don't require docs for test code
+#![expect(missing_docs)] // Don't require docs for test code
 use crate::{
     MemoryInterface, MemoryMappedRegister,
     architecture::arm::{
-        ArmError, ArmProbeInterface, DapAccess, FullyQualifiedApAddress, RawDapAccess,
+        ArmDebugInterface, ArmError, DapAccess, FullyQualifiedApAddress, RawDapAccess,
         RegisterAddress, SwoAccess,
         ap::memory_ap::mock::MockMemoryAp,
         armv8m::Dhcsr,
@@ -28,7 +28,7 @@ use std::{
 };
 
 /// This is a mock probe which can be used for mocking things in tests or for dry runs.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub struct FakeProbe {
     protocol: WireProtocol,
     speed: u32,
@@ -112,7 +112,7 @@ impl MemoryInterface<ArmError> for &mut MockCore {
 
         for (offset, val) in data.iter_mut().enumerate() {
             let address = address + offset as u64;
-            println!("Read {:#010x} = 0", address);
+            println!("Read {address:#010x} = 0");
 
             match self.program_binary {
                 Some(ref program_binary) => {
@@ -161,11 +161,11 @@ impl MemoryInterface<ArmError> for &mut MockCore {
                     dhcsr |= 1 << 16;
 
                     *val = dhcsr;
-                    println!("Read  DHCSR: {:#x} = {:#x}", address, val);
+                    println!("Read  DHCSR: {address:#x} = {val:#x}");
                 }
 
                 address => {
-                    println!("Read {:#010x} = 0", address);
+                    println!("Read {address:#010x} = 0");
 
                     match self.program_binary {
                         Some(ref program_binary) => {
@@ -227,7 +227,7 @@ impl MemoryInterface<ArmError> for &mut MockCore {
                     if dbg_key == 0xa05f {
                         // Mask out dbg key
                         self.dhcsr = Dhcsr::from(*word & 0xffff);
-                        println!("Write DHCSR = {:#010x}", word);
+                        println!("Write DHCSR = {word:#010x}");
 
                         let request_halt = self.dhcsr.c_halt();
 
@@ -239,7 +239,7 @@ impl MemoryInterface<ArmError> for &mut MockCore {
                         }
                     }
                 }
-                _ => println!("Write {:#010x} = {:#010x}", address, word),
+                _ => println!("Write {address:#010x} = {word:#010x}"),
             }
         }
 
@@ -272,15 +272,7 @@ impl ArmMemoryInterface for &mut MockCore {
         todo!()
     }
 
-    fn get_arm_probe_interface(&mut self) -> Result<&mut dyn ArmProbeInterface, DebugProbeError> {
-        todo!()
-    }
-
-    fn get_swd_sequence(&mut self) -> Result<&mut dyn SwdSequence, DebugProbeError> {
-        todo!()
-    }
-
-    fn get_dap_access(&mut self) -> Result<&mut dyn DapAccess, DebugProbeError> {
+    fn get_arm_debug_interface(&mut self) -> Result<&mut dyn ArmDebugInterface, DebugProbeError> {
         todo!()
     }
 
@@ -529,10 +521,10 @@ impl DebugProbe for FakeProbe {
         self
     }
 
-    fn try_get_arm_interface<'probe>(
+    fn try_get_arm_debug_interface<'probe>(
         self: Box<Self>,
         sequence: Arc<dyn ArmDebugSequence>,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
+    ) -> Result<Box<dyn ArmDebugInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
         Ok(Box::new(FakeArmInterface::new(self, sequence)))
     }
 
@@ -616,13 +608,7 @@ impl SwdSequence for FakeArmInterface {
     }
 }
 
-impl crate::architecture::arm::communication_interface::FlushableArmAccess for FakeArmInterface {
-    fn flush(&mut self) -> Result<(), ArmError> {
-        todo!()
-    }
-}
-
-impl ArmProbeInterface for FakeArmInterface {
+impl ArmDebugInterface for FakeArmInterface {
     fn memory_interface(
         &mut self,
         access_port_address: &FullyQualifiedApAddress,

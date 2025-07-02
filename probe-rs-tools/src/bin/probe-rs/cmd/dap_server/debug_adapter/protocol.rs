@@ -45,10 +45,10 @@ pub trait ProtocolAdapter {
 }
 
 pub trait ProtocolHelper {
-    fn show_message(&mut self, severity: MessageSeverity, message: impl Into<String>) -> bool;
+    fn show_message(&mut self, severity: MessageSeverity, message: impl AsRef<str>) -> bool;
 
     /// Log a message to the console. Returns false if logging the message failed.
-    fn log_to_console(&mut self, message: impl Into<String>) -> bool;
+    fn log_to_console(&mut self, message: impl AsRef<str>) -> bool;
 
     fn send_response<S: Serialize + std::fmt::Debug>(
         &mut self,
@@ -61,14 +61,14 @@ impl<P> ProtocolHelper for P
 where
     P: ProtocolAdapter,
 {
-    fn show_message(&mut self, severity: MessageSeverity, message: impl Into<String>) -> bool {
-        let msg = message.into();
+    fn show_message(&mut self, severity: MessageSeverity, message: impl AsRef<str>) -> bool {
+        let msg = message.as_ref();
 
         tracing::debug!("show_message: {msg}");
 
         let event_body = match serde_json::to_value(ShowMessageEventBody {
             severity,
-            message: format!("{}\n", msg),
+            message: format!("{msg}\n"),
         }) {
             Ok(event_body) => event_body,
             Err(_) => {
@@ -79,9 +79,9 @@ where
             .is_ok()
     }
 
-    fn log_to_console(&mut self, message: impl Into<String>) -> bool {
+    fn log_to_console(&mut self, message: impl AsRef<str>) -> bool {
         let event_body = match serde_json::to_value(OutputEventBody {
-            output: format!("{}\n", message.into()),
+            output: format!("{}\n", message.as_ref()),
             category: Some("console".to_owned()),
             variables_reference: None,
             source: None,
@@ -89,6 +89,7 @@ where
             column: None,
             data: None,
             group: Some("probe-rs-debug".to_owned()),
+            location_reference: None,
         }) {
             Ok(event_body) => event_body,
             Err(_) => {
@@ -348,7 +349,7 @@ impl<R: Read, W: Write> ProtocolAdapter for DapAdapter<R, W> {
             match self.console_log_level {
                 ConsoleLog::Console => {}
                 ConsoleLog::Info => {
-                    self.log_to_console(format!("\nTriggered DAP Event: {}", event_type));
+                    self.log_to_console(format!("\nTriggered DAP Event: {event_type}"));
                 }
                 ConsoleLog::Debug => {
                     self.log_to_console(format!("INFO: Triggered DAP Event: {new_event:#?}"));

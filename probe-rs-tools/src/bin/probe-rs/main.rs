@@ -447,8 +447,6 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    reject_format_arg(&args)?;
-
     let config = load_config().context("Failed to load configuration.")?;
 
     // Parse the commandline options.
@@ -535,7 +533,7 @@ fn apply_config_preset(
 
     let mut args_modified = false;
     for (arg, value) in preset {
-        let flag = format!("--{}", arg).into();
+        let flag = format!("--{arg}").into();
         if args.contains(&flag) {
             continue;
         }
@@ -553,11 +551,11 @@ fn apply_config_preset(
             Value::String(_, value) => args.push(value.into()),
             Value::Num(_, num) => {
                 if let Some(uint) = num.to_u128() {
-                    args.push(format!("{}", uint).into())
+                    args.push(format!("{uint}").into())
                 } else if let Some(int) = num.to_i128() {
-                    args.push(format!("{}", int).into())
+                    args.push(format!("{int}").into())
                 } else if let Some(float) = num.to_f64() {
-                    args.push(format!("{}", float).into())
+                    args.push(format!("{float}").into())
                 } else {
                     unreachable!()
                 }
@@ -568,23 +566,6 @@ fn apply_config_preset(
     }
 
     Ok(args_modified)
-}
-
-fn reject_format_arg(args: &[OsString]) -> anyhow::Result<()> {
-    if let Some(format_arg_pos) = args.iter().position(|arg| arg == "--format") {
-        if let Some(format_arg) = args.get(format_arg_pos + 1) {
-            if let Some(format_arg) = format_arg.to_str() {
-                if FormatKind::from_str(format_arg).is_ok() {
-                    anyhow::bail!(
-                        "--format has been renamed to --binary-format. Please use --binary-format {0} instead of --format {0}",
-                        format_arg
-                    );
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn compile_report(

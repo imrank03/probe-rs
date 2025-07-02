@@ -270,8 +270,14 @@ impl<'probe> Armv8a<'probe> {
 
                             self.execute_instruction_with_input_32(instruction, val.try_into()?)?;
 
-                            // Write to DLR
-                            let instruction = build_mrc(15, 3, 0, 4, 5, 1);
+                            // Arm A-profile Architecture Registers
+                            //   AArch32 Registers
+                            //     DLR, Debug Link Register
+                            //
+                            // In Debug state, holds the address to restart from.
+                            //
+                            // https://developer.arm.com/documentation/ddi0601/2025-03/AArch32-Registers/DLR--Debug-Link-Register
+                            let instruction = build_mcr(15, 3, 0, 4, 5, 1);
                             self.execute_instruction(instruction)?;
                         }
                         17..=48 => {
@@ -1168,6 +1174,10 @@ impl CoreInterface for Armv8a<'_> {
         // Reset our cached values
         self.reset_register_cache();
 
+        // Recompute / verify current state
+        self.set_core_status(CoreStatus::Running);
+        let _ = self.status()?;
+
         Ok(())
     }
 
@@ -1837,25 +1847,11 @@ mod test {
             todo!()
         }
 
-        fn get_arm_probe_interface(
+        fn get_arm_debug_interface(
             &mut self,
-        ) -> Result<&mut dyn crate::architecture::arm::ArmProbeInterface, DebugProbeError> {
+        ) -> Result<&mut dyn crate::architecture::arm::ArmDebugInterface, DebugProbeError> {
             Err(DebugProbeError::NotImplemented {
-                function_name: "get_arm_probe_interface",
-            })
-        }
-
-        fn get_swd_sequence(&mut self) -> Result<&mut dyn SwdSequence, DebugProbeError> {
-            Err(DebugProbeError::NotImplemented {
-                function_name: "get_swd_sequence",
-            })
-        }
-
-        fn get_dap_access(
-            &mut self,
-        ) -> Result<&mut dyn crate::architecture::arm::DapAccess, DebugProbeError> {
-            Err(DebugProbeError::NotImplemented {
-                function_name: "get_dap_access",
+                function_name: "get_arm_debug_interface",
             })
         }
 

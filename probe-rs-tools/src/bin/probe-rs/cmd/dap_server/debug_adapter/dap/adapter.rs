@@ -313,7 +313,8 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
             presentation_hint: None,
             result: format!("<invalid expression {:?}>", arguments.expression),
             type_: None,
-            variables_reference: 0_i64,
+            variables_reference: 0,
+            value_location_reference: None,
         };
 
         if let Some(context) = &arguments.context {
@@ -518,8 +519,7 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
 
         let Some(repl_command) = repl_commands.first() else {
             return Err(DebuggerError::UserMessage(format!(
-                "Invalid REPL command: {:?}.",
-                command_root
+                "Invalid REPL command: {command_root:?}."
             )));
         };
 
@@ -563,6 +563,8 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
             type_: None,
             value: String::new(),
             variables_reference: None,
+            memory_reference: None,
+            value_location_reference: None,
         };
 
         // The arguments.variables_reference contains the reference of the variable container. This can be:
@@ -907,6 +909,7 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
                             instruction_reference: Some(format!("{address:#010X}")),
                             offset: None,
                             verified: true,
+                            reason: None,
                         }),
                         Err(error) => created_breakpoints.push(Breakpoint {
                             column: None,
@@ -919,6 +922,7 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
                             instruction_reference: None,
                             offset: None,
                             verified: false,
+                            reason: Some("failed".to_string()),
                         }),
                     };
                 }
@@ -1397,6 +1401,8 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
                                 variable.get_value(&mut target_core.core)
                             },
                             variables_reference: variables_reference.into(),
+                            declaration_location_reference: None,
+                            value_location_reference: None,
                         }
                     })
                     .collect();
@@ -1465,6 +1471,8 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
                             type_: Some(format!("{}", VariableName::RegistersRoot)),
                             value: register.value.unwrap_or_default().to_string(),
                             variables_reference: 0,
+                            declaration_location_reference: None,
+                            value_location_reference: None,
                         })
                         .collect();
                     return self.send_response(
@@ -1535,6 +1543,8 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
                         type_: Some(variable.type_name()),
                         value: variable.to_string(variable_cache),
                         variables_reference: variables_reference.into(),
+                        declaration_location_reference: None,
+                        value_location_reference: None,
                     }
                 })
                 .collect();
@@ -1769,13 +1779,13 @@ impl<P: ProtocolAdapter> DebugAdapter<P> {
         self.adapter.send_event(event_type, event_body)
     }
 
-    pub fn log_to_console<S: Into<String>>(&mut self, message: S) -> bool {
+    pub fn log_to_console(&mut self, message: impl AsRef<str>) -> bool {
         self.adapter.log_to_console(message)
     }
 
     /// Send a custom "probe-rs-show-message" event to the MS DAP Client.
     /// The `severity` field can be one of `information`, `warning`, or `error`.
-    pub fn show_message(&mut self, severity: MessageSeverity, message: impl Into<String>) -> bool {
+    pub fn show_message(&mut self, severity: MessageSeverity, message: impl AsRef<str>) -> bool {
         self.adapter.show_message(severity, message)
     }
 
@@ -1912,11 +1922,15 @@ pub fn get_arguments<T: DeserializeOwned, P: ProtocolAdapter>(
     match serde_json::from_value(raw_arguments.to_owned()) {
         Ok(value) => Ok(value),
         Err(e) => {
+            let err = anyhow!(
+                "Failed to deserialize {} arguments: {}, error: {}",
+                req.command,
+                raw_arguments,
+                e
+            );
+
             debug_adapter.send_response::<()>(req, Err(&e.into()))?;
-            Err(DebuggerError::Other(anyhow!(
-                "Failed to deserialize {} arguments",
-                req.command
-            )))
+            Err(DebuggerError::Other(err))
         }
     }
 }

@@ -7,8 +7,8 @@ use bitvec::prelude::*;
 use probe_rs_target::ScanChainElement;
 
 use crate::probe::{
-    AutoImplementJtagAccess, BatchExecutionError, ChainParams, CommandResult, DebugProbeError,
-    DeferredResultSet, JtagAccess, JtagCommand, JtagCommandQueue, JtagSequence, RawJtagIo,
+    AutoImplementJtagAccess, BatchExecutionError, ChainParams, CommandQueue, CommandResult,
+    DebugProbeError, DeferredResultSet, JtagAccess, JtagCommand, JtagSequence, RawJtagIo,
 };
 
 pub(crate) fn bits_to_byte(bits: impl IntoIterator<Item = bool>) -> u32 {
@@ -533,8 +533,7 @@ fn prepare_write_register(
 ) -> Result<usize, DebugProbeError> {
     if address > protocol.state().max_ir_address() {
         return Err(DebugProbeError::Other(format!(
-            "Invalid instruction register access: {}",
-            address
+            "Invalid instruction register access: {address}"
         )));
     }
 
@@ -709,8 +708,8 @@ impl<Probe: AutoImplementJtagAccess> JtagAccess for Probe {
     #[tracing::instrument(skip(self, writes))]
     fn write_register_batch(
         &mut self,
-        writes: &JtagCommandQueue,
-    ) -> Result<DeferredResultSet, BatchExecutionError> {
+        writes: &CommandQueue<JtagCommand>,
+    ) -> Result<DeferredResultSet<CommandResult>, BatchExecutionError> {
         let mut bits = Vec::with_capacity(writes.len());
         let t1 = std::time::Instant::now();
         tracing::debug!("Preparing {} writes...", writes.len());
@@ -781,10 +780,10 @@ mod tests {
 
     #[test]
     fn id_code_display() {
-        let debug_fmt = format!("{idcode}", idcode = ARM_TAP);
+        let debug_fmt = format!("{ARM_TAP}");
         assert_eq!(debug_fmt, "0x4BA00477 (ARM Ltd)");
 
-        let debug_fmt = format!("{idcode}", idcode = STM_BS_TAP);
+        let debug_fmt = format!("{STM_BS_TAP}");
         assert_eq!(debug_fmt, "0x06433041 (STMicroelectronics)");
     }
 

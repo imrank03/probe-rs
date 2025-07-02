@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::architecture::arm::{
-    ArmCommunicationInterface, ArmError, ArmProbeInterface, DapError, RawDapAccess,
+    ArmCommunicationInterface, ArmDebugInterface, ArmError, DapError, RawDapAccess,
     RegisterAddress,
     communication_interface::DapProbe,
     dp::{DpRegister, RdBuff},
@@ -54,22 +54,24 @@ impl ProbeFactory for GlasgowFactory {
         // Return exactly the specified probe, if it has the option string (which is referred to
         // here as the serial number).
         if let Some(DebugProbeSelector {
-            vendor_id: vendor_id @ 0x20b7,
-            product_id: product_id @ 0x9db1,
+            vendor_id,
+            product_id,
             serial_number: serial_number @ Some(_),
         }) = selector
         {
-            vec![DebugProbeInfo {
-                identifier: "Glasgow".to_owned(),
-                vendor_id: *vendor_id,
-                product_id: *product_id,
-                serial_number: serial_number.clone(),
-                hid_interface: None,
-                probe_factory: &Self,
-            }]
-        } else {
-            vec![]
+            if *vendor_id == usb::VID_QIHW && *product_id == usb::PID_GLASGOW {
+                return vec![DebugProbeInfo {
+                    identifier: "Glasgow".to_owned(),
+                    vendor_id: *vendor_id,
+                    product_id: *product_id,
+                    serial_number: serial_number.clone(),
+                    hid_interface: None,
+                    probe_factory: &Self,
+                }];
+            }
         }
+
+        vec![]
     }
 }
 
@@ -264,10 +266,10 @@ impl DebugProbe for Glasgow {
         true
     }
 
-    fn try_get_arm_interface<'probe>(
+    fn try_get_arm_debug_interface<'probe>(
         self: Box<Self>,
         sequence: Arc<dyn ArmDebugSequence>,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
+    ) -> Result<Box<dyn ArmDebugInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
         // The Glasgow applet handles FAULT/WAIT states promptly.
         Ok(ArmCommunicationInterface::create(
             self, sequence, /*use_overrun_detect=*/ false,

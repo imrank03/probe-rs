@@ -85,6 +85,7 @@ pub async fn attach_probe(
     match result {
         AttachResult::Success(sessid) => Ok(SessionInterface::new(client.clone(), sessid)),
         AttachResult::ProbeNotFound => anyhow::bail!("Probe not found"),
+        AttachResult::FailedToOpenProbe(error) => anyhow::bail!("Failed to open probe: {error}"),
         AttachResult::ProbeInUse => anyhow::bail!("Probe is already in use"),
     }
 }
@@ -491,7 +492,7 @@ pub async fn monitor(
                 _ => String::from(""),
             };
 
-            println!("Firmware exited with: {}{}", reason, subcode);
+            println!("Firmware exited with: {reason}{subcode}");
 
             true
         }
@@ -610,7 +611,7 @@ fn create_trial(
                         Err(Failed::from(message))
                     }
                     Err(e) => {
-                        eprintln!("Error: {:?}", e);
+                        eprintln!("Error: {e:?}");
                         std::process::exit(1);
                     }
                 }
@@ -626,9 +627,9 @@ async fn display_stack_trace(session: &SessionInterface, path: &Path) -> anyhow:
     let stack_trace = session.stack_trace(path.to_path_buf()).await?;
 
     for StackTrace { core, frames } in stack_trace.cores.iter() {
-        println!("Core {}", core);
+        println!("Core {core}");
         for frame in frames {
-            println!("    {}", frame);
+            println!("    {frame}");
         }
     }
 

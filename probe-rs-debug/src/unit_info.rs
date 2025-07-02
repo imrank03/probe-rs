@@ -149,7 +149,7 @@ impl UnitInfo {
 
     /// Recurse the ELF structure below the `tree_node`,
     /// and updates the `cache` with the updated value of the `child_variable`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn process_tree_node_attributes(
         &self,
         debug_info: &DebugInfo,
@@ -309,8 +309,7 @@ impl UnitInfo {
                             VariableValue::Valid(const_value.to_string())
                         } else {
                             VariableValue::Error(format!(
-                                "Unimplemented: Attribute Value for DW_AT_const_value: {:?}",
-                                attr_value
+                                "Unimplemented: Attribute Value for DW_AT_const_value: {attr_value:?}"
                             ))
                         };
 
@@ -417,7 +416,7 @@ impl UnitInfo {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn process_type_attribute(
         &self,
         attr: &gimli::Attribute<GimliReader>,
@@ -962,7 +961,7 @@ impl UnitInfo {
     ///
     /// [e]: Self::extract_type()
     /// [p]: Self::process_tree()
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn extract_type(
         &self,
         debug_info: &DebugInfo,
@@ -1238,8 +1237,7 @@ impl UnitInfo {
             // Do not expand this type.
             other => {
                 child_variable.set_value(VariableValue::Error(format!(
-                    "<unimplemented: type: {}>",
-                    other
+                    "<unimplemented: type: {other}>"
                 )));
                 child_variable.type_name = VariableType::Other("unimplemented".to_string());
                 cache.remove_cache_entry_children(child_variable.variable_key)?;
@@ -1252,7 +1250,7 @@ impl UnitInfo {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn extract_struct(
         &self,
         type_name: Option<String>,
@@ -1315,7 +1313,7 @@ impl UnitInfo {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn extract_array_type(
         &self,
         node: &DebuggingInformationEntry<GimliReader>,
@@ -1385,7 +1383,7 @@ impl UnitInfo {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn extract_enumeration_type(
         &self,
         child_variable: &mut Variable,
@@ -1473,8 +1471,7 @@ impl UnitInfo {
                         VariableValue::Valid(const_value.to_string())
                     } else {
                         VariableValue::Error(format!(
-                            "Unimplemented: Attribute Value for DW_AT_const_value: {:?}",
-                            attr_value
+                            "Unimplemented: Attribute Value for DW_AT_const_value: {attr_value:?}"
                         ))
                     };
 
@@ -1500,7 +1497,7 @@ impl UnitInfo {
     }
 
     /// Create child variable entries to represent array members and their values.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn expand_array_members(
         &self,
         debug_info: &DebugInfo,
@@ -1598,7 +1595,6 @@ impl UnitInfo {
     }
 
     /// Process a memory location for a variable, by first evaluating the `byte_size`, and then calling the `self.extract_location`.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn process_memory_location(
         &self,
         debug_info: &DebugInfo,
@@ -1813,7 +1809,7 @@ impl UnitInfo {
             Ok(locations) => locations,
             Err(error) => {
                 return Ok(ExpressionResult::Location(VariableLocation::Error(
-                    format!("Error: Resolving variable Location: {:?}", error),
+                    format!("Error: Resolving variable Location: {error:?}"),
                 )));
             }
         };
@@ -1868,8 +1864,7 @@ impl UnitInfo {
         fn evaluate_address(address: u64, memory: &mut dyn MemoryInterface) -> ExpressionResult {
             let location = if address >= u32::MAX as u64 && !memory.supports_native_64bit_access() {
                 VariableLocation::Error(format!(
-                    "The memory location for this variable value ({:#010X}) is invalid. Please report this as a bug.",
-                    address
+                    "The memory location for this variable value ({address:#010X}) is invalid. Please report this as a bug."
                 ))
             } else {
                 VariableLocation::Address(address)
@@ -2324,10 +2319,7 @@ fn provide_register(
             Ok(evaluation.resume_with_register(register_value)?)
         }
         Some(_) => Err(DebugError::WarnAndContinue {
-            message: format!(
-                "Unimplemented: Support for type {:?} in `RequiresRegister`",
-                base_type
-            ),
+            message: format!("Unimplemented: Support for type {base_type:?} in `RequiresRegister`"),
         }),
         None => Err(DebugError::WarnAndContinue {
             message: format!(

@@ -10,7 +10,7 @@ use std::{
 use crate::{
     architecture::{
         arm::{
-            ArmCommunicationInterface, ArmError, ArmProbeInterface,
+            ArmCommunicationInterface, ArmDebugInterface, ArmError,
             communication_interface::DapProbe, sequences::ArmDebugSequence,
         },
         riscv::{
@@ -79,7 +79,7 @@ impl core::fmt::Display for ProtocolVersion {
     }
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Debug)]
 enum RemoteCommand<'a> {
     Handshake(&'a mut [u8]),
@@ -281,7 +281,7 @@ impl RemoteCommand<'_> {
 
 // Implement `ToString` instead of `Display` as this is for generating
 // strings to send over the network, and is not meant for human consumption.
-#[allow(clippy::to_string_trait_impl)]
+#[expect(clippy::to_string_trait_impl)]
 impl std::string::ToString for RemoteCommand<'_> {
     fn to_string(&self) -> String {
         match self {
@@ -289,7 +289,7 @@ impl std::string::ToString for RemoteCommand<'_> {
             RemoteCommand::GetVoltage => " !GV#".to_string(),
             RemoteCommand::GetSpeedKhz => "!Gf#".to_string(),
             RemoteCommand::SetSpeedHz(speed) => {
-                format!("!GF{:08x}#", speed)
+                format!("!GF{speed:08x}#")
             }
             RemoteCommand::HighLevelCheck => "!HC#".to_string(),
             RemoteCommand::SetNrst(set) => format!("!GZ{}#", if *set { '1' } else { '0' }),
@@ -299,10 +299,10 @@ impl std::string::ToString for RemoteCommand<'_> {
             }
             RemoteCommand::SpeedKhz => "!Gf#".to_string(),
             RemoteCommand::RawAccessV0P { rnw, addr, value } => {
-                format!("!HL{:02x}{:04x}{:08x}#", rnw, addr, value)
+                format!("!HL{rnw:02x}{addr:04x}{value:08x}#")
             }
             RemoteCommand::ReadDpV0P { addr } => {
-                format!("!Hdff{:04x}#", addr)
+                format!("!Hdff{addr:04x}#")
             }
             RemoteCommand::ReadApV0P { apsel, addr } => {
                 format!("!Ha{:02x}{:04x}#", apsel, 0x100 | *addr as u16)
@@ -338,7 +338,7 @@ impl std::string::ToString for RemoteCommand<'_> {
                     data.len(),
                 );
                 for b in data.iter() {
-                    s.push_str(&format!("{:02x}", b));
+                    s.push_str(&format!("{b:02x}"));
                 }
                 s.push('#');
                 s
@@ -350,10 +350,10 @@ impl std::string::ToString for RemoteCommand<'_> {
                 addr,
                 value,
             } => {
-                format!("!HL{:02x}{:02x}{:04x}{:08x}#", index, rnw, addr, value)
+                format!("!HL{index:02x}{rnw:02x}{addr:04x}{value:08x}#")
             }
             RemoteCommand::ReadDpV1 { index, addr } => {
-                format!("!Hd{:02x}ff{:04x}#", index, addr)
+                format!("!Hd{index:02x}ff{addr:04x}#")
             }
             RemoteCommand::ReadApV1 { index, apsel, addr } => {
                 format!("!Ha{:02x}{:02x}{:04x}#", index, apsel, 0x100 | *addr as u16)
@@ -402,7 +402,7 @@ impl std::string::ToString for RemoteCommand<'_> {
                     data.len()
                 );
                 for b in data.iter() {
-                    s.push_str(&format!("{:02x}", b));
+                    s.push_str(&format!("{b:02x}"));
                 }
                 s.push('#');
                 s
@@ -414,10 +414,10 @@ impl std::string::ToString for RemoteCommand<'_> {
                 addr,
                 value,
             } => {
-                format!("!AR{:02x}{:02x}{:04x}{:08x}#", index, rnw, addr, value)
+                format!("!AR{index:02x}{rnw:02x}{addr:04x}{value:08x}#")
             }
             RemoteCommand::ReadDpV3 { index, addr } => {
-                format!("!Ad{:02x}ff{:04x}#", index, addr)
+                format!("!Ad{index:02x}ff{addr:04x}#")
             }
             RemoteCommand::ReadApV3 { index, apsel, addr } => {
                 format!("!Aa{:02x}{:02x}{:04x}#", index, apsel, 0x100 | *addr as u16)
@@ -466,7 +466,7 @@ impl std::string::ToString for RemoteCommand<'_> {
                     data.len()
                 );
                 for b in data.iter() {
-                    s.push_str(&format!("{:02x}", b));
+                    s.push_str(&format!("{b:02x}"));
                 }
                 s.push('#');
                 s
@@ -504,7 +504,7 @@ impl std::string::ToString for RemoteCommand<'_> {
                     data.len()
                 );
                 for b in data.iter() {
-                    s.push_str(&format!("{:02x}", b));
+                    s.push_str(&format!("{b:02x}"));
                 }
                 s.push('#');
                 s
@@ -574,8 +574,8 @@ impl core::fmt::Display for RemoteError {
             Self::ParameterError(e) => write!(f, "Remote paramater error with result {:016x}", *e),
             Self::Error(e) => write!(f, "Remote error with result {:016x}", *e),
             Self::Unsupported(e) => write!(f, "Remote command unsupported with result {:016x}", *e),
-            Self::ProbeError(e) => write!(f, "Probe error {}", e),
-            Self::UnsupportedVersion(e) => write!(f, "Only versions 0-4 are supported, not {}", e),
+            Self::ProbeError(e) => write!(f, "Probe error {e}"),
+            Self::UnsupportedVersion(e) => write!(f, "Only versions 0-4 are supported, not {e}"),
         }
     }
 }
@@ -699,7 +699,6 @@ impl BlackMagicProbe {
             swd_direction: SwdDirection::Output,
         };
 
-        probe.command(RemoteCommand::SetPower(false)).ok();
         probe.command(RemoteCommand::SetNrst(false)).ok();
         probe.command(RemoteCommand::GetVoltage).ok();
         probe.command(RemoteCommand::SetSpeedHz(400_0000)).ok();
@@ -725,7 +724,7 @@ impl BlackMagicProbe {
     ) -> Result<(), RemoteError> {
         let s = command.to_string();
         tracing::debug!(" > {}", s);
-        write!(writer, "{}", s).map_err(RemoteError::ProbeError)?;
+        write!(writer, "{s}").map_err(RemoteError::ProbeError)?;
         writer.flush().map_err(RemoteError::ProbeError)
     }
 
@@ -915,10 +914,6 @@ impl BlackMagicProbe {
     }
 
     /// Perform a single SWDIO command
-    ///
-    /// The caller needs to ensure that the given iterators are not longer than the maximum transfer size
-    /// allowed. It seems that the maximum transfer size is determined by [`self.max_mem_block_size`].
-    #[allow(clippy::unnecessary_fallible_conversions)] //  IoSequenceItem conversion may panic
     fn perform_swdio_transfer<S>(&mut self, swdio: S) -> Result<Vec<bool>, DebugProbeError>
     where
         S: IntoIterator<Item = IoSequenceItem>,
@@ -1147,10 +1142,10 @@ impl DebugProbe for BlackMagicProbe {
     }
 
     /// Turn this probe into an ARM probe
-    fn try_get_arm_interface<'probe>(
+    fn try_get_arm_debug_interface<'probe>(
         mut self: Box<Self>,
         sequence: Arc<dyn ArmDebugSequence>,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
+    ) -> Result<Box<dyn ArmDebugInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
         let has_adiv5 = match self.remote_protocol {
             ProtocolVersion::V0 => false,
             ProtocolVersion::V0P

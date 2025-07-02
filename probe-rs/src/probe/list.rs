@@ -4,7 +4,9 @@ use crate::probe::{
     DebugProbeError, DebugProbeInfo, DebugProbeSelector, Probe, ProbeCreationError, ProbeFactory,
 };
 
-use super::{blackmagic, cmsisdap, espusbjtag, ftdi, glasgow, jlink, sifliuart, stlink, wlink};
+use super::{
+    blackmagic, ch347usbjtag, cmsisdap, espusbjtag, ftdi, glasgow, jlink, sifliuart, stlink, wlink,
+};
 
 /// Struct to list all attached debug probes
 #[derive(Debug)]
@@ -77,20 +79,20 @@ impl ProbeLister for AllProbesLister {
         let selector = selector.into();
 
         let mut open_error = None;
+        let mut fallback_error = ProbeCreationError::NotFound;
 
         for probe_ctor in Self::DRIVERS {
             match probe_ctor.open(&selector) {
                 Ok(link) => return Ok(Probe::from_specific_probe(link)),
                 Err(DebugProbeError::ProbeCouldNotBeCreated(ProbeCreationError::NotFound)) => {}
+                Err(DebugProbeError::ProbeCouldNotBeCreated(ProbeCreationError::CouldNotOpen)) => {
+                    fallback_error = ProbeCreationError::CouldNotOpen;
+                }
                 Err(e) => open_error = Some(e),
             };
         }
 
-        Err(
-            open_error.unwrap_or(DebugProbeError::ProbeCouldNotBeCreated(
-                ProbeCreationError::NotFound,
-            )),
-        )
+        Err(open_error.unwrap_or(DebugProbeError::ProbeCouldNotBeCreated(fallback_error)))
     }
 
     async fn list(&self, selector: Option<&DebugProbeSelector>) -> Vec<DebugProbeInfo> {
@@ -121,6 +123,7 @@ impl AllProbesLister {
         &wlink::WchLinkFactory,
         &sifliuart::SifliUartFactory,
         &glasgow::GlasgowFactory,
+        &ch347usbjtag::Ch347UsbJtagFactory,
     ];
 
     /// Create a new lister with all built-in probe drivers.

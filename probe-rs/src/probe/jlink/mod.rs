@@ -26,7 +26,7 @@ use self::interface::{Interface, Interfaces};
 use self::speed::SpeedConfig;
 use self::swo::SwoMode;
 use crate::architecture::arm::sequences::ArmDebugSequence;
-use crate::architecture::arm::{ArmError, ArmProbeInterface, Pins};
+use crate::architecture::arm::{ArmDebugInterface, ArmError, Pins};
 use crate::architecture::riscv::communication_interface::RiscvError;
 use crate::architecture::xtensa::communication_interface::{
     XtensaCommunicationInterface, XtensaDebugInterfaceState, XtensaError,
@@ -299,7 +299,7 @@ impl Drop for JLink {
 }
 
 #[repr(u8)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 enum Command {
     Version = 0x01,
     Register = 0x09,
@@ -426,8 +426,7 @@ impl JLink {
             let real_caps = self.read_n::<32>().map(Capabilities::from_raw_ex)?;
             if !real_caps.contains_all(caps) {
                 return Err(JlinkError::Other(format!(
-                    "ext. caps are not a superset of legacy caps (legacy: {:?}, ex: {:?})",
-                    caps, real_caps
+                    "ext. caps are not a superset of legacy caps (legacy: {caps:?}, ex: {real_caps:?})"
                 )));
             }
             tracing::debug!("extended caps: {:?}", real_caps);
@@ -1125,10 +1124,10 @@ impl DebugProbe for JLink {
         Some(self)
     }
 
-    fn try_get_arm_interface<'probe>(
+    fn try_get_arm_debug_interface<'probe>(
         self: Box<Self>,
         sequence: Arc<dyn ArmDebugSequence>,
-    ) -> Result<Box<dyn ArmProbeInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
+    ) -> Result<Box<dyn ArmDebugInterface + 'probe>, (Box<dyn DebugProbe>, ArmError)> {
         Ok(ArmCommunicationInterface::create(self, sequence, true))
     }
 
@@ -1346,7 +1345,7 @@ impl HardwareVersion {
 impl fmt::Display for HardwareVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(hw) = self.hardware_type() {
-            write!(f, "{} ", hw)?;
+            write!(f, "{hw} ")?;
         }
         write!(f, "{}.{}.{}", self.major(), self.minor(), self.revision())
     }

@@ -539,7 +539,7 @@ impl CoreHandle<'_> {
                         // We will use the path as the key to store the handle.
                         // This way, we can reuse the same handle for the same path.
                         let handle = self.core_data.next_semihosting_handle;
-                        #[allow(
+                        #[expect(
                             clippy::unwrap_used,
                             reason = "Infallible because we start from 1024"
                         )]
@@ -581,7 +581,7 @@ impl CoreHandle<'_> {
                             if !string.is_empty() {
                                 string.push(' ');
                             }
-                            string.push_str(&format!("{:02x}", byte));
+                            string.push_str(&format!("{byte:02x}"));
                         }
                         string
                     } else {

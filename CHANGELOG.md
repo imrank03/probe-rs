@@ -1247,6 +1247,7 @@ Released 2023-01-13
 - Added support for the STM32F2 family (#675).
 - Added support for FE310-G002 (HiFive1 Rev. B).
 - Added flash algorithm for GD32VF1 family (#830).
+- Added support for SAML21 Series.
 
 ### Changed
 

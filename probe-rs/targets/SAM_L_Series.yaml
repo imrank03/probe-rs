@@ -109,7 +109,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_64
-  - atsaml21_64_eeprom
 - name: ATSAML21E16B
   cores:
   - name: main
@@ -145,7 +144,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_64
-  - atsaml21_64_eeprom
 - name: ATSAML21E17A
   cores:
   - name: main
@@ -181,7 +179,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_128
-  - atsaml21_128_eeprom
 - name: ATSAML21E17B
   cores:
   - name: main
@@ -217,7 +214,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_128
-  - atsaml21_128_eeprom
 - name: ATSAML21E18B
   cores:
   - name: main
@@ -289,7 +285,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_64
-  - atsaml21_64_eeprom
 - name: ATSAML21G16B
   cores:
   - name: main
@@ -325,7 +320,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_64
-  - atsaml21_64_eeprom
 - name: ATSAML21G17A
   cores:
   - name: main
@@ -361,7 +355,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_128
-  - atsaml21_128_eeprom
 - name: ATSAML21G17B
   cores:
   - name: main
@@ -397,7 +390,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_128
-  - atsaml21_128_eeprom
 - name: ATSAML21G18A
   cores:
   - name: main
@@ -505,7 +497,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_64
-  - atsaml21_64_eeprom
 - name: ATSAML21J16B
   cores:
   - name: main
@@ -541,7 +532,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_64
-  - atsaml21_64_eeprom
 - name: ATSAML21J17A
   cores:
   - name: main
@@ -577,7 +567,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_128
-  - atsaml21_128_eeprom
 - name: ATSAML21J17B
   cores:
   - name: main
@@ -613,7 +602,6 @@ variants:
       execute: false
   flash_algorithms:
   - atsaml21_128
-  - atsaml21_128_eeprom
 - name: ATSAML21J18A
   cores:
   - name: main
@@ -712,7 +700,6 @@ variants:
     - main
   flash_algorithms:
   - atsaml21_64
-  - atsaml22_64_eeprom
 - name: ATSAML22G17A
   cores:
   - name: main
@@ -739,7 +726,6 @@ variants:
     - main
   flash_algorithms:
   - atsaml21_128
-  - atsaml22_128_eeprom
 - name: ATSAML22G18A
   cores:
   - name: main
@@ -793,7 +779,6 @@ variants:
     - main
   flash_algorithms:
   - atsaml21_64
-  - atsaml22_64_eeprom
 - name: ATSAML22J17A
   cores:
   - name: main
@@ -820,7 +805,6 @@ variants:
     - main
   flash_algorithms:
   - atsaml21_128
-  - atsaml22_128_eeprom
 - name: ATSAML22J18A
   cores:
   - name: main
@@ -874,7 +858,6 @@ variants:
     - main
   flash_algorithms:
   - atsaml21_64
-  - atsaml22_64_eeprom
 - name: ATSAML22N17A
   cores:
   - name: main
@@ -901,7 +884,6 @@ variants:
     - main
   flash_algorithms:
   - atsaml21_128
-  - atsaml22_128_eeprom
 - name: ATSAML22N18A
   cores:
   - name: main

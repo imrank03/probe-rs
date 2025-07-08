@@ -11,14 +11,14 @@ variants:
   memory_map:
   - !Nvm
     range:
-      start: 0x0
-      end: 0x2000
+      start: 0x20000000
+      end: 0x40000000
     cores:
     - main
   - !Ram
     range:
-      start: 0x10000
-      end: 0x20000
+      start: 0x80000000
+      end: 0x80004000
     cores:
     - main
     access:
